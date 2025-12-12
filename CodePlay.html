@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>CodePlay Editor</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#111827">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
+
+    <!-- CodePlay 本体が必要とするライブラリ -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ['sans-serif'], mono: ['Menlo', 'Monaco', 'Consolas', 'monospace'] },
+            colors: { editor: { bg: '#1e1e1e', sidebar: '#252526', active: '#37373d', border: '#333' } }
+          },
+        },
+      }
+    </script>
+    <style>
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: #1e1e1e; }
+      ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+      body { margin: 0; overflow: hidden; background-color: #111827; touch-action: manipulation; }
+      #root { height: 100vh; height: 100dvh; }
+      input, textarea, button { font-size: 14px; }
+      .modal-overlay { background-color: rgba(0,0,0,0.7); backdrop-filter: blur(2px); }
+    </style>
+  </head>
+  <body>
+    <div id="root" class="w-screen flex flex-col"></div>
+
+    <script type="text/babel" data-presets="react,typescript">
+      const { useState, useEffect, useRef, useMemo } = React;
+
+      // --- アイコン定義 ---
+      const Icon = ({ path, size = 18, className = ""}) => (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} dangerouslySetInnerHTML={{ __html: path }} />);
+      const Icons = {
+        Plus: (p) => <Icon {...p} path='<path d="M5 12h14"/><path d="M12 5v14"/>' />,
+        NewFolder: (p) => <Icon {...p} path='<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" x2="12" y1="11" y2="17"/><line x1="9" x2="15" y1="14" y2="14"/>' />,
+        Trash2: (p) => <Icon {...p} path='<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>' />,
+        Folder: (p) => <Icon {...p} path='<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' />,
+        Edit: (p) => <Icon {...p} path='<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>' />,
+        File: (p) => <Icon {...p} path='<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>' />,
+        X: (p) => <Icon {...p} path='<path d="M18 6 6 18"/><path d="m6 6 12 12"/>' />,
+        Code: (p) => <Icon {...p} path='<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>' />,
+        Play: (p) => <Icon {...p} path='<polygon points="5 3 19 12 5 21 5 3"/>' />,
+        List: (p) => <Icon {...p} path='<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>' />,
+        RotateCcw: (p) => <Icon {...p} path='<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>' />,
+        Archive: (p) => <Icon {...p} path='<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>' />,
+        ChevronDown: (p) => <Icon {...p} path='<polyline points="6 9 12 15 18 9"/>' />,
+        ChevronRight: (p) => <Icon {...p} path='<polyline points="9 18 15 12 9 6"/>' />,
+        Github: (p) => <Icon {...p} path='<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>' />,
+        Flash: (p) => <Icon {...p} path='<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' />,
+        Upload: (p) => <Icon {...p} path='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>' />
+      };
+
+      const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
+
+      const Editor = ({ file, onChange }) => {
+        const textareaRef = useRef(null);
+        useEffect(() => { if (textareaRef.current) textareaRef.current.scrollTop = 0; }, [file?.id]);
+        if (!file) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-editor-bg h-full"><Icons.Code size={48} className="mb-4 opacity-20" /><p>ファイルを選択してください</p></div>;
+        return (
+          <div className="flex flex-col h-full bg-editor-bg">
+            <div className="flex items-center justify-between px-4 py-2 bg-editor-sidebar border-b border-editor-border shrink-0"><span className="text-sm font-medium text-gray-200">{file.name}</span></div>
+            <textarea ref={textareaRef} value={file.content} onChange={(e) => onChange(e.target.value)} className="flex-1 w-full bg-editor-bg text-gray-300 font-mono text-sm p-4 resize-none focus:outline-none leading-6" spellCheck={false} autoCapitalize="off" placeholder="// コードを入力..." />
+          </div>
+        );
+      };
+
+      const buildFileTree = (files) => {
+        const root = { name: "root", isFolder: true, children: {}, path: "" };
+        files.forEach(file => {
+          const parts = file.name.split('/');
+          let current = root;
+          parts.forEach((part, index) => {
+            const currentPath = parts.slice(0, index + 1).join('/');
+            if (index === parts.length - 1) current.children[part] = { ...file, isFolder: false, path: file.name };
+            else { if (!current.children[part]) current.children[part] = { name: part, isFolder: true, children: {}, path: currentPath }; current = current.children[part]; }
+          });
+        });
+        return root;
+      };
+
+      const FileTreeNode = ({ node, activeFileId, onSelect, onDelete, onRenameFile, onRenameFolder, onDeleteFolder, depth = 0 }) => {
+        const [isOpen, setIsOpen] = useState(true);
+        if (!node.isFolder) {
+          return (
+             <div onClick={() => onSelect(node.id)} className={`group flex justify-between items-center py-1.5 pr-2 cursor-pointer text-sm hover:bg-gray-800 ${activeFileId === node.id ? 'bg-editor-active text-white border-l-2 border-l-blue-500' : 'text-gray-400 border-l-2 border-transparent'}`} style={{ paddingLeft: `${depth * 12 + 12}px` }}>
+                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden"><Icons.File size={14} className="shrink-0 opacity-70" /><span className="truncate">{node.name.split('/').pop()}</span></div>
+                <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1"><button onClick={(e)=>{e.stopPropagation(); onRenameFile(node);}} className="text-gray-500 hover:text-white"><Icons.Edit size={13}/></button><button onClick={(e)=>{e.stopPropagation(); if(confirm(`削除: ${node.name}?`)) onDelete(node.id);}} className="text-gray-500 hover:text-red-400"><Icons.Trash2 size={13}/></button></div>
+             </div>
+          );
+        }
+        const children = Object.values(node.children).sort((a, b) => (a.isFolder === b.isFolder ? a.name.localeCompare(b.name) : a.isFolder ? -1 : 1));
+        if (node.name === "root") return <div className="flex flex-col">{children.map((child) => <FileTreeNode key={child.path} node={child} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} depth={0} />)}</div>;
+        return (
+          <div className="flex flex-col select-none">
+            <div onClick={() => setIsOpen(!isOpen)} className={`group flex justify-between items-center py-1.5 pr-2 cursor-pointer text-sm text-gray-300 hover:bg-gray-800 hover:text-white`} style={{ paddingLeft: `${depth * 12 + 6}px` }}>
+              <div className="flex items-center gap-1 min-w-0 overflow-hidden"><span className="p-0.5 text-gray-500">{isOpen ? <Icons.ChevronDown size={14}/> : <Icons.ChevronRight size={14}/>}</span><Icons.Folder size={14} className="shrink-0 text-blue-400" /><span className="truncate font-medium">{node.name}</span></div>
+              <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1"><button onClick={(e)=>{e.stopPropagation(); onRenameFolder(node.path, node.name);}} className="text-gray-500 hover:text-white"><Icons.Edit size={13}/></button><button onClick={(e)=>{e.stopPropagation(); if(confirm(`フォルダ削除: ${node.name}?`)) onDeleteFolder(node.path);}} className="text-gray-500 hover:text-red-400"><Icons.Trash2 size={13}/></button></div>
+            </div>
+            {isOpen && <div className="flex flex-col">{children.map((child) => <FileTreeNode key={child.path} node={child} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} depth={depth + 1} />)}</div>}
+          </div>
+        );
+      };
+
+      const GitHubModal = ({ isOpen, onClose, files }) => {
+         const [token, setToken] = useState(localStorage.getItem('cp_gh_token') || '');
+         const [repo, setRepo] = useState(localStorage.getItem('cp_gh_repo') || '');
+         const [branch, setBranch] = useState(localStorage.getItem('cp_gh_branch') || 'main');
+         const [status, setStatus] = useState('');
+         const [isUploading, setIsUploading] = useState(false);
+         const handlePush = async () => {
+             if(!token || !repo) return alert('Tokenとリポジトリ名は必須です');
+             localStorage.setItem('cp_gh_token', token); localStorage.setItem('cp_gh_repo', repo); localStorage.setItem('cp_gh_branch', branch);
+             setIsUploading(true); setStatus('接続中...');
+             try {
+                const headers = { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' };
+                const repoUrl = `https://api.github.com/repos/${repo}`;
+                let res = await fetch(repoUrl, { headers }); if (!res.ok) throw new Error(`リポジトリが見つかりません: ${res.status}`);
+                const validFiles = files.filter(f => !f.name.endsWith('.keep'));
+                for (const file of validFiles) {
+                    setStatus(`Uploading ${file.name}...`);
+                    const content = btoa(unescape(encodeURIComponent(file.content)));
+                    const fileUrl = `${repoUrl}/contents/${file.name}`;
+                    let sha = null;
+                    try { const check = await fetch(fileUrl + `?ref=${branch}`, { headers }); if(check.ok) sha = (await check.json()).sha; } catch(e){}
+                    const body = { message: `Update ${file.name}`, content, branch, ...(sha ? {sha} : {}) };
+                    const put = await fetch(fileUrl, { method: 'PUT', headers: {...headers, 'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+                    if(!put.ok) throw new Error(`Failed: ${file.name}`);
+                }
+                setStatus('完了しました！');
+             } catch(e) { setStatus('Error: ' + e.message); } finally { setIsUploading(false); }
+         };
+         if(!isOpen) return null;
+         return (
+             <div className="fixed inset-0 z-[100] modal-overlay flex items-center justify-center p-4">
+                 <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-md p-6 shadow-2xl">
+                     <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Icons.Github size={24}/> GitHubへプッシュ</h2>
+                     <div className="space-y-3">
+                         <div><label className="text-xs text-gray-400">GitHub Token</label><input value={token} onChange={e=>setToken(e.target.value)} type="password" className="w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1"/></div>
+                         <div><label className="text-xs text-gray-400">Repo (user/repo)</label><input value={repo} onChange={e=>setRepo(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1"/></div>
+                         <div className="text-xs font-mono text-green-400 min-h-[20px]">{status}</div>
+                         <div className="flex justify-end gap-2 mt-2"><button onClick={onClose} className="px-4 py-2 text-sm text-gray-400">閉じる</button><button onClick={handlePush} disabled={isUploading} className="px-4 py-2 text-sm bg-green-600 text-white rounded font-bold">{isUploading?'...':'Push'}</button></div>
+                     </div>
+                 </div>
+             </div>
+         );
+      };
+
+      const Preview = ({ files }) => {
+        const [srcDoc, setSrcDoc] = useState('');
+        useEffect(() => {
+          try {
+            const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
+            const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'index.js'].includes(f.name));
+            if (!entryFile) { setSrcDoc('<body>エントリーポイント(src/main.tsxなど)が見つかりません。</body>'); return; }
+
+            const imports = {
+                "react": "https://esm.sh/react@18.2.0",
+                "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            };
+            
+            const compiledFiles = {};
+            files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name)).forEach(file => {
+                if (file.name.endsWith('.css')) {
+                    compiledFiles[file.name] = `const style = new CSSStyleSheet(); style.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default style;`;
+                } else {
+                    const result = window.Babel.transform(file.content, { presets: ['react', 'typescript'], filename: file.name });
+                    compiledFiles[file.name] = result.code;
+                }
+            });
+
+            const cssImports = files.filter(f => f.name.endsWith('.css')).map(f => `import css_${files.indexOf(f)} from './${f.name}'; document.adoptedStyleSheets.push(css_${files.indexOf(f)});`).join('\n');
+            
+            const blobUrls = {};
+            for (const path in compiledFiles) {
+                let code = compiledFiles[path];
+                // import './App.css' -> import sheet from './App.css'; document.adoptedStyleSheets.push(sheet);
+                code = code.replace(/import\s+['"]\.(\/[^'"]+)\.css['"];/g, (match, p) => {
+                    const cssFile = files.find(f => f.name === p.substring(1));
+                    if(!cssFile) return '';
+                    return `import css_${files.indexOf(cssFile)} from '.${p}.css'; document.adoptedStyleSheets.push(css_${files.indexOf(cssFile)});`
+                });
+
+                const blob = new Blob([code], { type: 'application/javascript' });
+                blobUrls["./" + path] = URL.createObjectURL(blob);
+                blobUrls["./" + path.replace(/\.(tsx|ts|jsx|js|css)$/, '')] = URL.createObjectURL(blob);
+            }
+            
+            const html = `
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <meta charset="utf-8">
+                  <script type="importmap">
+                    { "imports": ${JSON.stringify({...imports, ...blobUrls})} }
+                  <\/script>
+                </head>
+                <body>
+                  <div id="root"></div>
+                  <script type="module">
+                    document.adoptedStyleSheets = [];
+                    ${cssImports}
+                    import "./${entryFile.name}";
+                  <\/script>
+                </body>
+              </html>`;
+            setSrcDoc(html);
+          } catch(e) {
+              console.error(e);
+              setSrcDoc(`<body>Preview Error: ${e.message}</body>`);
+          }
+        }, [files]);
+
+        return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms" title="Preview" />;
+      };
+
+      const FileExplorer = ({ files, activeFileId, onSelect, onAdd, onDelete, onUpload, onRenameFile, onRenameFolder, onDeleteFolder, onGitHub, onGenerateConfig }) => {
+        const [name, setName] = useState('');
+        const [isAdding, setIsAdding] = useState(false);
+        const fileInputRef = useRef(null);
+        const fileTree = useMemo(() => buildFileTree(files), [files]);
+        const handleSubmit = (e) => { e.preventDefault(); if(!name)return; onAdd(name, 'text', ''); setName(''); setIsAdding(false); };
+        const handleCreateFolder = () => { const n = prompt("フォルダ名:"); if(n) onAdd(`${n}/.keep`, 'text', ''); };
+        const handleDownloadZip = async () => {
+          if (!window.JSZip) { alert('JSZip not loaded.'); return; }
+          const zip = new JSZip(); files.forEach(f => { if(!f.name.endsWith('.keep')) zip.file(f.name, f.content); });
+          const content = await zip.generateAsync({type: "blob"});
+          const link = document.createElement('a'); link.href = URL.createObjectURL(content); link.download = `codeplay_project.zip`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        };
+        const handleUpload = (e) => { Array.from(e.target.files).forEach(file => { const r = new FileReader(); r.onload = (ev) => onUpload(file.name, ev.target.result, 'text'); r.readAsText(file); }); e.target.value = ''; }
+        
+        return (
+          <div className="flex flex-col h-full bg-editor-sidebar border-r border-editor-border">
+             <div className="p-3 border-b border-editor-border flex flex-col gap-2 shrink-0">
+               <div className="flex justify-between items-center"><span className="text-xs font-bold text-gray-400">Explorer</span></div>
+               <button onClick={onGenerateConfig} className="w-full text-[10px] bg-blue-900/40 text-blue-300 border border-blue-800 py-1.5 rounded hover:bg-blue-800/60 flex items-center justify-center gap-1"><Icons.Flash size={12}/> Cloudflare構成作成</button>
+               <div className="flex gap-1 justify-between pt-1">
+                 <button onClick={onGitHub} className="text-gray-400 hover:text-white p-1" title="GitHub Push"><Icons.Github size={16}/></button>
+                 <button onClick={handleDownloadZip} className="text-gray-400 hover:text-white p-1" title="ZIP Download"><Icons.Archive size={16}/></button>
+                 <button onClick={()=>fileInputRef.current.click()} className="text-gray-400 hover:text-white p-1" title="Import File"><Icons.Upload size={16}/></button>
+                 <button onClick={handleCreateFolder} className="text-gray-400 hover:text-white p-1" title="New Folder"><Icons.NewFolder size={16}/></button>
+                 <button onClick={()=>setIsAdding(!isAdding)} className="text-gray-400 hover:text-white p-1" title="New File"><Icons.Plus size={16}/></button>
+               </div>
+               <input type="file" multiple ref={fileInputRef} onChange={handleUpload} className="hidden" />
+             </div>
+             {isAdding && <form onSubmit={handleSubmit} className="p-2 bg-gray-800 shrink-0 border-b border-editor-border"><input value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-900 text-white text-sm p-2 rounded outline-none border border-blue-500" placeholder="例: src/App.tsx" autoFocus onBlur={()=>{if(!name)setIsAdding(false)}}/></form>}
+             <div className="flex-1 overflow-y-auto group">
+               {files.length === 0 ? <div className="p-4 text-xs text-center text-gray-600">ファイルがありません<br/>まずは「Cloudflare構成作成」<br/>を押してください</div> : <FileTreeNode node={fileTree} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} />}
+             </div>
+          </div>
+        );
+      };
+
+      const App = () => {
+        const [files, setFiles] = useState(() => { try { return JSON.parse(localStorage.getItem('cp_files') || '[]'); } catch { return []; } });
+        const [activeId, setActiveId] = useState(null);
+        const [sidebarOpen, setSidebarOpen] = useState(false);
+        const [mobileTab, setMobileTab] = useState('files');
+        const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+        const [showGithub, setShowGithub] = useState(false);
+        useEffect(() => localStorage.setItem('cp_files', JSON.stringify(files)), [files]);
+        useEffect(() => { const h = () => setIsMobile(window.innerWidth < 768); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, []);
+
+        const handleRenameFile = (node) => { const n = prompt("新しいファイル名:", node.name); if (n && n !== node.name) setFiles(prev => prev.map(f => f.id === node.id ? { ...f, name: n } : f)); };
+        const handleRenameFolder = (oldP, oldN) => { const n = prompt("新しいフォルダ名:", oldN); if (n && n !== oldN) { const pre = oldP + "/", parent = oldP.substring(0, oldP.lastIndexOf('/')), newP = parent ? `${parent}/${n}` : n; setFiles(prev => prev.map(f => f.name.startsWith(pre) ? { ...f, name: f.name.replace(oldP, newP) } : f)); }};
+        const handleDeleteFolder = (path) => setFiles(prev => prev.filter(f => !f.name.startsWith(path + "/")));
+
+        // ★ Cloudflare/Vite用の標準構成を一発作成する機能
+        const handleGenerateConfig = () => {
+            if(files.length > 0 && !confirm('現在のファイルを上書きして、Cloudflare用テンプレートを生成しますか？')) return;
+            const template = [
+                { name: "package.json", content: JSON.stringify({ "name": "codeplay-app", "private": true, "version": "0.0.0", "type": "module", "scripts": { "dev": "vite", "build": "npm i && tsc && vite build", "preview": "vite preview" }, "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" }, "devDependencies": { "@types/react": "^18.2.0", "@types/react-dom": "^18.2.0", "@vitejs/plugin-react": "^4.0.3", "typescript": "^5.0.2", "vite": "^4.4.5", "tailwindcss": "^3.3.3", "postcss": "^8.4.27", "autoprefixer": "^10.4.14" } }, null, 2) },
+                { name: "vite.config.ts", content: `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nexport default defineConfig({ plugins: [react()] });` },
+                { name: "index.html", content: `<!DOCTYPE html>\n<html lang="ja">\n<head>\n<meta charset="UTF-8" />\n<meta name="viewport" content="width=device-width, initial-scale=1.0" />\n<title>My App</title>\n</head>\n<body>\n<div id="root"></div>\n<script type="module" src="/src/main.tsx"><\/script>\n</body>\n</html>` },
+                { name: "src/main.tsx", content: `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>\n);` },
+                { name: "src/App.tsx", content: `import React from 'react';\n\nexport default function App() {\n  return (\n    <div className="p-10 bg-slate-900 min-h-screen flex items-center justify-center">\n      <div className="text-center">\n        <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">Hello Cloudflare!</h1>\n        <p className="mt-4 text-slate-400">CodePlayで編集したアプリが、Cloudflare Pagesで動いています。</p>\n      </div>\n    </div>\n  );\n}` },
+                { name: "src/index.css", content: `@tailwind base;\n@tailwind components;\n@tailwind utilities;` },
+                { name: "tailwind.config.js", content: `/** @type {import('tailwindcss').Config} */\nexport default {\n  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],\n  theme: { extend: {} },\n  plugins: [],\n}` },
+                { name: "postcss.config.js", content: `export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n}` },
+                { name: "tsconfig.json", content: JSON.stringify({ "compilerOptions": { "target": "ES2020", "useDefineForClassFields": true, "lib": ["ES2020", "DOM", "DOM.Iterable"], "module": "ESNext", "skipLibCheck": true, "moduleResolution": "bundler", "allowImportingTsExtensions": true, "resolveJsonModule": true, "isolatedModules": true, "noEmit": true, "jsx": "react-jsx", "strict": true }, "include": ["src"] }, null, 2) },
+            ];
+            const newFiles = template.map(t => ({ id: generateId(), name: t.name, content: t.content }));
+            setFiles(newFiles);
+            setActiveId(newFiles.find(f => f.name === 'src/App.tsx')?.id);
+        };
+
+        const activeFile = files.find(f => f.id === activeId);
+
+        return (
+          <div className="flex flex-col h-full text-white font-sans bg-gray-900">
+            <header className="bg-editor-sidebar border-b border-editor-border p-1 flex items-center justify-between shrink-0 h-16 z-20 shadow-md">
+               <div className="flex items-center gap-2 pl-1">
+                 <div className="flex flex-col justify-center pl-2"><span className="font-bold text-base tracking-tight leading-tight">CodePlay</span><span className="text-[10px] text-gray-500 leading-tight">Environment</span></div>
+               </div>
+               <div className="flex items-center gap-1 pr-1"><button onClick={()=>{if(confirm('現在のプロジェクトを完全に削除しますか？')){setFiles([]); setActiveId(null);}}} className="flex flex-col items-center justify-center p-2 text-gray-400 hover:text-white rounded hover:bg-gray-700 w-14"><Icons.RotateCcw size={18}/><span className="text-[10px] mt-0.5">Reset</span></button></div>
+            </header>
+            <main className="flex-1 flex overflow-hidden relative">
+               <div className={`${(isMobile && mobileTab !== 'files') ? 'hidden' : 'flex'} w-full md:w-56 md:flex-none flex-col h-full z-10 border-r border-editor-border bg-editor-sidebar`}>
+                  <FileExplorer files={files} activeFileId={activeId} onSelect={(id)=>{setActiveId(id); if(isMobile) setMobileTab('editor');}} onAdd={(n,l,c)=>setFiles([...files, {id:generateId(), name:n, language:l, content:c||''} ])} onDelete={(id)=>{setFiles(f=>f.filter(x=>x.id!==id)); if(activeId===id) setActiveId(null);}} onUpload={(n,c,l)=>setFiles(prev=>[...prev, {id:generateId(), name:n, language:l, content:c}])} onRenameFile={handleRenameFile} onRenameFolder={handleRenameFolder} onDeleteFolder={handleDeleteFolder} onGitHub={()=>setShowGithub(true)} onGenerateConfig={handleGenerateConfig} />
+               </div>
+               <div className={`${(isMobile && mobileTab !== 'editor') ? 'hidden' : 'flex'} flex-1 flex-col min-w-0 md:border-r border-editor-border md:max-w-[50%]`}>
+                 <Editor file={activeFile} onChange={(val)=>setFiles(files.map(f=>f.id===activeId?{...f, content:val}:f))} />
+               </div>
+               <div className={`${(isMobile && mobileTab !== 'preview') ? 'hidden' : 'flex'} flex-1 flex-col bg-white h-full`}><Preview files={files} /></div>
+            </main>
+            <div className="md:hidden h-16 bg-editor-sidebar border-t border-editor-border flex items-center justify-around shrink-0 pb-safe z-30">
+              <button onClick={()=>setMobileTab('files')} className={`flex flex-col items-center justify-center gap-0.5 w-full h-full ${mobileTab==='files'?'text-blue-400 bg-gray-800':'text-gray-500'}`}><Icons.List size={20}/><span className="text-[10px]">Files</span></button>
+              <button onClick={()=>setMobileTab('editor')} className={`flex flex-col items-center justify-center gap-0.5 w-full h-full ${mobileTab==='editor'?'text-blue-400 bg-gray-800':'text-gray-500'}`}><Icons.Code size={20}/><span className="text-[10px]">Code</span></button>
+              <button onClick={()=>setMobileTab('preview')} className={`flex flex-col items-center justify-center gap-0.5 w-full h-full ${mobileTab==='preview'?'text-blue-400 bg-gray-800':'text-gray-500'}`}><Icons.Play size={20}/><span className="text-[10px]">Run</span></button>
+            </div>
+            <GitHubModal isOpen={showGithub} onClose={()=>setShowGithub(false)} files={files} />
+          </div>
+        );
+      };
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  </body>
+</html>
