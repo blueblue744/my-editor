@@ -89,7 +89,7 @@
         );
       };
 
-      // --- プレビューエンジン ---
+      // --- プレビューエンジン (Smart Mode) ---
       const Preview = ({ files }) => {
         const [srcDoc, setSrcDoc] = useState('');
         
@@ -111,6 +111,23 @@
             const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
             let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
 
+            // --- Case 1: Raw Mode (完全なHTMLファイルの場合) ---
+            // <html, <!DOCTYPE が含まれている場合は、余計なことをせずにそのまま表示する
+            // これで「野菜ソムリエ」も「電卓」も、作者の意図通りに動く
+            if (!entryFile && (rawHtml.includes('<html') || rawHtml.includes('<!DOCTYPE'))) {
+               // ただし、エラー表示だけは入れたいので、headの直後に注入
+               if (rawHtml.includes('<head>')) {
+                   setSrcDoc(rawHtml.replace('<head>', `<head>${errorScript}`));
+               } else {
+                   setSrcDoc(errorScript + rawHtml);
+               }
+               return;
+            }
+
+            // --- Case 2: Vite Mode (src/main.tsxがある場合) ---
+            // Cloudflare/Vite構成の場合は、ビルドプロセスをシミュレートする
+            
+            // CSS Injection
             const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
             const styleTag = `<style>${css} body { background-color: white; }</style>`;
             if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
@@ -124,10 +141,10 @@
             `;
             if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${errorScript}${libs}`); else rawHtml = errorScript + libs + rawHtml;
 
-            // --- VITE MODE (src/main.tsxがある) ---
             if (entryFile) {
                const imports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0", "@google/genai": "https://esm.sh/@google/genai@0.1.1" };
                const blobUrls = {};
+               
                files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name) && !f.name.includes('vite.config')).forEach(file => {
                   let code = file.content;
                   if (file.name.endsWith('.css')) {
@@ -136,61 +153,52 @@
                       try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } 
                       catch(e) { console.error(e); }
                   }
-                  if(code){
-                    const blob = new Blob([code], { type: 'application/javascript' });
-                    const url = URL.createObjectURL(blob);
-                    blobUrls[`./${file.name}`] = url;
-                    blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
-                  }
+                  const blob = new Blob([code], { type: 'application/javascript' });
+                  const url = URL.createObjectURL(blob);
+                  blobUrls[`./${file.name}`] = url;
+                  blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
                });
+
                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
                rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
+               
                const entryScript = `<script type="module">
                   document.adoptedStyleSheets = [];
                   ${files.filter(f => f.name.endsWith('.css')).map((f,i) => `import s${i} from './${f.name}'; document.adoptedStyleSheets.push(s${i});`).join('\n')}
                   import './${entryFile.name}';
                <\/script>`;
                if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${entryScript}</body>`); else rawHtml += entryScript;
-
             } 
-            // --- CLASSIC MODE (単一HTML) ---
+            
+            // --- Case 3: Snippet Mode (断片的なコードの場合) ---
             else {
-               // ★修正: filenameを指定してコンパイルし、moduleとして実行
                const shimScript = `
                  <script>
                    window.addEventListener('DOMContentLoaded', () => {
                      const scripts = document.querySelectorAll('script[type="text/babel"]');
                      scripts.forEach((s, i) => {
                        try {
-                         // filenameを明示的に指定してBabelのエラーを回避
-                         const res = Babel.transform(s.innerHTML, { 
-                           presets: [
-                             ['env', { modules: false, targets: { esmodules: true } }], 
-                             'react', 'typescript'
-                           ],
-                           filename: 'script_' + i + '.tsx' 
-                         });
-                         
+                         const res = Babel.transform(s.innerHTML, { presets: ['react', 'typescript'], filename: 'script_' + i + '.tsx' });
                          const newScript = document.createElement('script');
                          newScript.type = 'module';
                          newScript.textContent = res.code;
                          document.body.appendChild(newScript);
-                       } catch(e) { 
-                         console.error('Compile Error:', e);
-                         document.body.innerHTML += '<div style="color:red; background:white; padding:10px;">Compile Error: ' + e.message + '</div>';
-                       }
+                       } catch(e) { console.error(e); }
                      });
                    });
                  <\/script>
                `;
                if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${shimScript}</body>`);
             }
+
             setSrcDoc(rawHtml);
           } catch(e) { setSrcDoc(`<body><div style="color:red;padding:20px;">System Error: ${e.message}</div></body>`); }
         }, [files]);
-        return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms" title="Preview" />;
+
+        return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-downloads" title="Preview" />;
       };
 
+      // --- サイドバー (プロジェクト管理) ---
       const Sidebar = ({ isOpen, onClose, projects, onSave, onLoad, onDelete, onClear, onImportJSON }) => {
         const fileInputRef = useRef(null);
         const handleExportJSON = () => {
