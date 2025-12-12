@@ -72,6 +72,7 @@
 
       const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
+      // --- エディタコンポーネント ---
       const Editor = ({ file, onChange }) => {
         const textareaRef = useRef(null);
         useEffect(() => { if (textareaRef.current) textareaRef.current.scrollTop = 0; }, [file?.id]);
@@ -88,11 +89,12 @@
         );
       };
 
+      // --- プレビューエンジン (Final Fixed) ---
       const Preview = ({ files }) => {
         const [srcDoc, setSrcDoc] = useState('');
         
         useEffect(() => {
-          // エラー表示用スクリプト (共通)
+          // エラー表示用スクリプト
           const errorScript = `
             <script>
               window.onerror = function(msg, url, line, col, error) {
@@ -109,6 +111,7 @@
             const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
             let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
 
+            // CSS Injection
             const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
             const styleTag = `<style>${css} body { background-color: white; }</style>`;
             if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
@@ -122,7 +125,7 @@
             `;
             if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${errorScript}${libs}`); else rawHtml = errorScript + libs + rawHtml;
 
-            // --- VITE MODE (src/main.tsxがある場合) ---
+            // --- VITE MODE (src/main.tsxがある) ---
             if (entryFile) {
                const imports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0", "@google/genai": "https://esm.sh/@google/genai@0.1.1" };
                const blobUrls = {};
@@ -131,15 +134,15 @@
                   if (file.name.endsWith('.css')) {
                       code = `const s = new CSSStyleSheet(); s.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default s;`;
                   } else {
-                      try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } 
-                      catch(e) { console.error(e); }
+                      try { 
+                        // ★修正: filenameを指定してBabelエラーを回避
+                        code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; 
+                      } catch(e) { console.error(e); }
                   }
-                  if(code){
-                    const blob = new Blob([code], { type: 'application/javascript' });
-                    const url = URL.createObjectURL(blob);
-                    blobUrls[`./${file.name}`] = url;
-                    blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
-                  }
+                  const blob = new Blob([code], { type: 'application/javascript' });
+                  const url = URL.createObjectURL(blob);
+                  blobUrls[`./${file.name}`] = url;
+                  blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
                });
                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
                rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
@@ -151,29 +154,28 @@
                if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${entryScript}</body>`); else rawHtml += entryScript;
 
             } 
-            // --- CLASSIC MODE (単一HTML / 野菜ソムリエ対応) ---
+            // --- CLASSIC MODE (単一HTML) ---
             else {
-               // ★修正: import文を含むスクリプトを type="module" に変換して注入する
+               // ★修正: こちらもfilenameを指定してコンパイル
+               // 野菜ソムリエのようなimportを含むコードも動くように type="module" で注入
                const shimScript = `
                  <script>
                    window.addEventListener('DOMContentLoaded', () => {
                      const scripts = document.querySelectorAll('script[type="text/babel"]');
-                     scripts.forEach(s => {
+                     scripts.forEach((s, idx) => {
                        try {
-                         // importがあるかチェック
-                         const isModule = s.getAttribute('data-type') === 'module' || s.innerHTML.includes('import ');
-                         
-                         // Babelでトランスパイル (modules: false で import を維持)
+                         // ★重要: filenameオプションを追加 (dummy.tsx)
                          const res = Babel.transform(s.innerHTML, { 
                            presets: [
                              ['env', { modules: false, targets: { esmodules: true } }], 
                              'react', 'typescript'
-                           ] 
+                           ],
+                           filename: 'script_' + idx + '.tsx' 
                          });
                          
-                         // モジュールとして注入
+                         // すべてモジュールとして実行することで import を許容
                          const newScript = document.createElement('script');
-                         newScript.type = isModule ? 'module' : 'text/javascript';
+                         newScript.type = 'module';
                          newScript.textContent = res.code;
                          document.body.appendChild(newScript);
                        } catch(e) { 
@@ -192,6 +194,7 @@
         return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-downloads" title="Preview" />;
       };
 
+      // --- サイドバー (プロジェクト管理) ---
       const Sidebar = ({ isOpen, onClose, projects, onSave, onLoad, onDelete, onClear, onImportJSON }) => {
         const fileInputRef = useRef(null);
         const handleExportJSON = () => {
