@@ -72,7 +72,6 @@
 
       const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
-      // --- エディタコンポーネント ---
       const Editor = ({ file, onChange }) => {
         const textareaRef = useRef(null);
         useEffect(() => { if (textareaRef.current) textareaRef.current.scrollTop = 0; }, [file?.id]);
@@ -89,18 +88,18 @@
         );
       };
 
-      // --- プレビューエンジン (Smart Mode) ---
+      // --- プレビューエンジン (シンプル&最強版) ---
       const Preview = ({ files }) => {
         const [srcDoc, setSrcDoc] = useState('');
         
         useEffect(() => {
-          // エラー表示用スクリプト
+          // エラー表示用
           const errorScript = `
             <script>
               window.onerror = function(msg, url, line, col, error) {
                 var div = document.createElement("div");
                 div.style.cssText = "position:fixed;top:0;left:0;width:100%;height:auto;max-height:100%;background:#330000;color:#ff9999;padding:20px;z-index:99999;font-family:monospace;white-space:pre-wrap;overflow:auto;box-sizing:border-box;";
-                div.innerHTML = "<h3>⚠️ Runtime Error</h3>" + msg + "<br><small>Line: " + line + "</small>";
+                div.innerHTML = "<h3>⚠️ Error</h3>" + msg;
                 document.body.appendChild(div);
                 return false;
               };
@@ -111,28 +110,28 @@
             const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
             let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
 
-            // --- Case 1: Raw Mode (完全なHTMLファイルの場合) ---
-            // <html, <!DOCTYPE が含まれている場合は、余計なことをせずにそのまま表示する
-            // これで「野菜ソムリエ」も「電卓」も、作者の意図通りに動く
-            if (!entryFile && (rawHtml.includes('<html') || rawHtml.includes('<!DOCTYPE'))) {
-               // ただし、エラー表示だけは入れたいので、headの直後に注入
+            // 【判定】これは完成されたHTMLファイルか？ (DOCTYPEやhtmlタグがあるか)
+            const isFullHtml = rawHtml.includes('<!DOCTYPE') || rawHtml.includes('<html');
+
+            // --- Case 1: Raw Mode (パススルー) ---
+            // 野菜ソムリエや電卓はここを通る。余計な処理をせずそのまま出す。
+            if (isFullHtml && !entryFile) {
+               // エラー表示だけ注入して終了
                if (rawHtml.includes('<head>')) {
                    setSrcDoc(rawHtml.replace('<head>', `<head>${errorScript}`));
                } else {
                    setSrcDoc(errorScript + rawHtml);
                }
-               return;
+               return; 
             }
 
-            // --- Case 2: Vite Mode (src/main.tsxがある場合) ---
-            // Cloudflare/Vite構成の場合は、ビルドプロセスをシミュレートする
+            // --- Case 2: Vite Mode (プロジェクト形式) ---
+            // Cloudflare用アプリはここを通る。ビルド環境をシミュレートする。
             
-            // CSS Injection
             const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
             const styleTag = `<style>${css} body { background-color: white; }</style>`;
             if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
 
-            // 必須ライブラリ
             const libs = `
               <script src="https://cdn.tailwindcss.com"><\/script>
               <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
@@ -168,33 +167,11 @@
                   import './${entryFile.name}';
                <\/script>`;
                if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${entryScript}</body>`); else rawHtml += entryScript;
-            } 
-            
-            // --- Case 3: Snippet Mode (断片的なコードの場合) ---
-            else {
-               const shimScript = `
-                 <script>
-                   window.addEventListener('DOMContentLoaded', () => {
-                     const scripts = document.querySelectorAll('script[type="text/babel"]');
-                     scripts.forEach((s, i) => {
-                       try {
-                         const res = Babel.transform(s.innerHTML, { presets: ['react', 'typescript'], filename: 'script_' + i + '.tsx' });
-                         const newScript = document.createElement('script');
-                         newScript.type = 'module';
-                         newScript.textContent = res.code;
-                         document.body.appendChild(newScript);
-                       } catch(e) { console.error(e); }
-                     });
-                   });
-                 <\/script>
-               `;
-               if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${shimScript}</body>`);
             }
 
             setSrcDoc(rawHtml);
           } catch(e) { setSrcDoc(`<body><div style="color:red;padding:20px;">System Error: ${e.message}</div></body>`); }
         }, [files]);
-
         return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-downloads" title="Preview" />;
       };
 
