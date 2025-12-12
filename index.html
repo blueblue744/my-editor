@@ -90,14 +90,19 @@
 
       const Preview = ({ files }) => {
         const [srcDoc, setSrcDoc] = useState('');
+        
         useEffect(() => {
-          // エラー表示用
-          const errorScript = `<script>
-            window.onerror = function(msg, url, line, col, error) {
-              document.body.innerHTML += '<div style="position:fixed;top:0;left:0;width:100%;background:#500;color:#fff;padding:10px;z-index:9999;">Runtime Error: ' + msg + '</div>';
-              return false;
-            };
-          <\/script>`;
+          // エラー表示用スクリプト (共通)
+          const errorScript = `
+            <script>
+              window.onerror = function(msg, url, line, col, error) {
+                var div = document.createElement("div");
+                div.style.cssText = "position:fixed;top:0;left:0;width:100%;height:auto;max-height:100%;background:#330000;color:#ff9999;padding:20px;z-index:99999;font-family:monospace;white-space:pre-wrap;overflow:auto;box-sizing:border-box;";
+                div.innerHTML = "<h3>⚠️ Runtime Error</h3>" + msg + "<br><small>Line: " + line + "</small>";
+                document.body.appendChild(div);
+                return false;
+              };
+            <\/script>`;
 
           try {
             const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
@@ -117,7 +122,7 @@
             `;
             if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${errorScript}${libs}`); else rawHtml = errorScript + libs + rawHtml;
 
-            // Mode 1: Vite Project
+            // --- VITE MODE (src/main.tsxがある場合) ---
             if (entryFile) {
                const imports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0", "@google/genai": "https://esm.sh/@google/genai@0.1.1" };
                const blobUrls = {};
@@ -126,12 +131,15 @@
                   if (file.name.endsWith('.css')) {
                       code = `const s = new CSSStyleSheet(); s.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default s;`;
                   } else {
-                      try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } catch(e){}
+                      try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } 
+                      catch(e) { console.error(e); }
                   }
-                  const blob = new Blob([code], { type: 'application/javascript' });
-                  const url = URL.createObjectURL(blob);
-                  blobUrls[`./${file.name}`] = url;
-                  blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
+                  if(code){
+                    const blob = new Blob([code], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    blobUrls[`./${file.name}`] = url;
+                    blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
+                  }
                });
                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
                rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
@@ -143,16 +151,19 @@
                if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${entryScript}</body>`); else rawHtml += entryScript;
 
             } 
-            // Mode 2: Single HTML (野菜ソムリエ対応)
+            // --- CLASSIC MODE (単一HTML / 野菜ソムリエ対応) ---
             else {
-               // ★重要: HTML内のスクリプトを走査して、importがあるならmodule、なければ通常実行するランナー
-               const runner = `
+               // ★修正: import文を含むスクリプトを type="module" に変換して注入する
+               const shimScript = `
                  <script>
                    window.addEventListener('DOMContentLoaded', () => {
                      const scripts = document.querySelectorAll('script[type="text/babel"]');
                      scripts.forEach(s => {
                        try {
-                         // 1. Babelでコンパイル (import文は残す設定)
+                         // importがあるかチェック
+                         const isModule = s.getAttribute('data-type') === 'module' || s.innerHTML.includes('import ');
+                         
+                         // Babelでトランスパイル (modules: false で import を維持)
                          const res = Babel.transform(s.innerHTML, { 
                            presets: [
                              ['env', { modules: false, targets: { esmodules: true } }], 
@@ -160,25 +171,25 @@
                            ] 
                          });
                          
-                         // 2. type="module" として注入 (これでimportが動く)
+                         // モジュールとして注入
                          const newScript = document.createElement('script');
-                         newScript.type = 'module';
+                         newScript.type = isModule ? 'module' : 'text/javascript';
                          newScript.textContent = res.code;
                          document.body.appendChild(newScript);
                        } catch(e) { 
                          console.error('Compile Error:', e);
-                         document.body.innerHTML += '<div style="color:red">Compile Error: ' + e.message + '</div>';
+                         document.body.innerHTML += '<div style="color:red; background:white; padding:10px;">Compile Error: ' + e.message + '</div>';
                        }
                      });
                    });
                  <\/script>
                `;
-               if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${runner}</body>`);
+               if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${shimScript}</body>`);
             }
             setSrcDoc(rawHtml);
-          } catch(e) { setSrcDoc(`<body>Error: ${e.message}</body>`); }
+          } catch(e) { setSrcDoc(`<body><div style="color:red;padding:20px;">System Error: ${e.message}</div></body>`); }
         }, [files]);
-        return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms" title="Preview" />;
+        return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-downloads" title="Preview" />;
       };
 
       const Sidebar = ({ isOpen, onClose, projects, onSave, onLoad, onDelete, onClear, onImportJSON }) => {
