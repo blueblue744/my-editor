@@ -89,7 +89,7 @@
         );
       };
 
-      // --- プレビューエンジン (Final Fixed) ---
+      // --- プレビューエンジン ---
       const Preview = ({ files }) => {
         const [srcDoc, setSrcDoc] = useState('');
         
@@ -111,7 +111,6 @@
             const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
             let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
 
-            // CSS Injection
             const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
             const styleTag = `<style>${css} body { background-color: white; }</style>`;
             if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
@@ -134,15 +133,15 @@
                   if (file.name.endsWith('.css')) {
                       code = `const s = new CSSStyleSheet(); s.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default s;`;
                   } else {
-                      try { 
-                        // ★修正: filenameを指定してBabelエラーを回避
-                        code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; 
-                      } catch(e) { console.error(e); }
+                      try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } 
+                      catch(e) { console.error(e); }
                   }
-                  const blob = new Blob([code], { type: 'application/javascript' });
-                  const url = URL.createObjectURL(blob);
-                  blobUrls[`./${file.name}`] = url;
-                  blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
+                  if(code){
+                    const blob = new Blob([code], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    blobUrls[`./${file.name}`] = url;
+                    blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
+                  }
                });
                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
                rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
@@ -156,24 +155,22 @@
             } 
             // --- CLASSIC MODE (単一HTML) ---
             else {
-               // ★修正: こちらもfilenameを指定してコンパイル
-               // 野菜ソムリエのようなimportを含むコードも動くように type="module" で注入
+               // ★修正: filenameを指定してコンパイルし、moduleとして実行
                const shimScript = `
                  <script>
                    window.addEventListener('DOMContentLoaded', () => {
                      const scripts = document.querySelectorAll('script[type="text/babel"]');
-                     scripts.forEach((s, idx) => {
+                     scripts.forEach((s, i) => {
                        try {
-                         // ★重要: filenameオプションを追加 (dummy.tsx)
+                         // filenameを明示的に指定してBabelのエラーを回避
                          const res = Babel.transform(s.innerHTML, { 
                            presets: [
                              ['env', { modules: false, targets: { esmodules: true } }], 
                              'react', 'typescript'
                            ],
-                           filename: 'script_' + idx + '.tsx' 
+                           filename: 'script_' + i + '.tsx' 
                          });
                          
-                         // すべてモジュールとして実行することで import を許容
                          const newScript = document.createElement('script');
                          newScript.type = 'module';
                          newScript.textContent = res.code;
@@ -191,10 +188,9 @@
             setSrcDoc(rawHtml);
           } catch(e) { setSrcDoc(`<body><div style="color:red;padding:20px;">System Error: ${e.message}</div></body>`); }
         }, [files]);
-        return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-downloads" title="Preview" />;
+        return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms" title="Preview" />;
       };
 
-      // --- サイドバー (プロジェクト管理) ---
       const Sidebar = ({ isOpen, onClose, projects, onSave, onLoad, onDelete, onClear, onImportJSON }) => {
         const fileInputRef = useRef(null);
         const handleExportJSON = () => {
