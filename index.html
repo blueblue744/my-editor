@@ -72,66 +72,43 @@
 
       const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
-      // --- エディタコンポーネント ---
       const Editor = ({ file, onChange }) => {
         const textareaRef = useRef(null);
         useEffect(() => { if (textareaRef.current) textareaRef.current.scrollTop = 0; }, [file?.id]);
-
         const handleSelectAll = () => { if (textareaRef.current) { textareaRef.current.focus(); textareaRef.current.select(); } };
-
         if (!file) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-editor-bg h-full"><Icons.Code size={48} className="mb-4 opacity-20" /><p>ファイルを選択してください</p></div>;
-
         return (
           <div className="flex flex-col h-full bg-editor-bg relative group">
             <div className="flex items-center justify-between px-4 py-2 bg-editor-sidebar border-b border-editor-border shrink-0">
               <span className="text-sm font-medium text-gray-200">{file.name}</span>
-              <button onClick={handleSelectAll} className="flex flex-col items-center justify-center p-1 text-gray-500 hover:text-white rounded hover:bg-gray-700 w-12 transition-colors" title="全選択">
-                <Icons.SelectAll size={18} />
-              </button>
+              <button onClick={handleSelectAll} className="flex flex-col items-center justify-center p-1 text-gray-500 hover:text-white rounded hover:bg-gray-700 w-12 transition-colors" title="全選択"><Icons.SelectAll size={18} /></button>
             </div>
-            <textarea
-              ref={textareaRef}
-              value={file.content}
-              onChange={(e) => onChange(e.target.value)}
-              className="flex-1 w-full bg-editor-bg text-gray-300 font-mono text-sm p-4 resize-none focus:outline-none leading-6"
-              spellCheck={false}
-              autoCapitalize="off"
-              placeholder="// ここにコードをペースト..."
-            />
+            <textarea ref={textareaRef} value={file.content} onChange={(e) => onChange(e.target.value)} className="flex-1 w-full bg-editor-bg text-gray-300 font-mono text-sm p-4 resize-none focus:outline-none leading-6" spellCheck={false} autoCapitalize="off" placeholder="// ここにコードをペースト..." />
           </div>
         );
       };
 
-      // --- プレビューエンジン (完全修正版) ---
       const Preview = ({ files }) => {
         const [srcDoc, setSrcDoc] = useState('');
-        
         useEffect(() => {
-          // エラー表示用スクリプト (共通)
-          const errorScript = `
-            <script>
-              window.onerror = function(msg, url, line, col, error) {
-                var div = document.createElement("div");
-                div.style.cssText = "position:fixed;top:0;left:0;width:100%;height:auto;max-height:100%;background:#330000;color:#ff9999;padding:20px;z-index:99999;font-family:monospace;white-space:pre-wrap;overflow:auto;box-sizing:border-box;";
-                div.innerHTML = "<h3>⚠️ Runtime Error</h3>" + msg + "<br><small>Line: " + line + "</small>";
-                document.body.appendChild(div);
-                return false;
-              };
-            <\/script>`;
+          // エラー表示用
+          const errorScript = `<script>
+            window.onerror = function(msg, url, line, col, error) {
+              document.body.innerHTML += '<div style="position:fixed;top:0;left:0;width:100%;background:#500;color:#fff;padding:10px;z-index:9999;">Runtime Error: ' + msg + '</div>';
+              return false;
+            };
+          <\/script>`;
 
           try {
             const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
             const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
-            
-            // ユーザーのHTMLを取得 (なければデフォルト)
             let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
 
-            // CSS Injection
             const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
             const styleTag = `<style>${css} body { background-color: white; }</style>`;
             if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
 
-            // 必須ライブラリ注入
+            // 必須ライブラリ
             const libs = `
               <script src="https://cdn.tailwindcss.com"><\/script>
               <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
@@ -140,31 +117,24 @@
             `;
             if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${errorScript}${libs}`); else rawHtml = errorScript + libs + rawHtml;
 
-            // --- Case 1: Vite Mode (src/main.tsxがある) ---
+            // Mode 1: Vite Project
             if (entryFile) {
-               const imports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0" };
+               const imports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0", "@google/genai": "https://esm.sh/@google/genai@0.1.1" };
                const blobUrls = {};
-               
                files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name) && !f.name.includes('vite.config')).forEach(file => {
                   let code = file.content;
                   if (file.name.endsWith('.css')) {
                       code = `const s = new CSSStyleSheet(); s.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default s;`;
                   } else {
-                      try {
-                        code = Babel.transform(file.content, { presets: ['react', 'typescript'], filename: file.name }).code;
-                      } catch(e) { console.error(e); code = `console.error("Compile Error: ${e.message}");`; }
+                      try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } catch(e){}
                   }
                   const blob = new Blob([code], { type: 'application/javascript' });
                   const url = URL.createObjectURL(blob);
                   blobUrls[`./${file.name}`] = url;
                   blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
                });
-
                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
-               rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`);
-               
-               // Viteエントリポイント置換
-               rawHtml = rawHtml.replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
+               rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
                const entryScript = `<script type="module">
                   document.adoptedStyleSheets = [];
                   ${files.filter(f => f.name.endsWith('.css')).map((f,i) => `import s${i} from './${f.name}'; document.adoptedStyleSheets.push(s${i});`).join('\n')}
@@ -173,38 +143,44 @@
                if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${entryScript}</body>`); else rawHtml += entryScript;
 
             } 
-            // --- Case 2: Classic Mode (単一HTML) ---
+            // Mode 2: Single HTML (野菜ソムリエ対応)
             else {
-               // ★修正ポイント: importを含むスクリプトも動くように type="module" で注入する
-               const shimScript = `
+               // ★重要: HTML内のスクリプトを走査して、importがあるならmodule、なければ通常実行するランナー
+               const runner = `
                  <script>
                    window.addEventListener('DOMContentLoaded', () => {
                      const scripts = document.querySelectorAll('script[type="text/babel"]');
                      scripts.forEach(s => {
                        try {
-                         // Babelで変換
-                         const code = Babel.transform(s.innerHTML, { presets: ['react', 'typescript'] }).code;
-                         // moduleとして実行 (importも使えるように)
-                         const script = document.createElement('script');
-                         script.type = 'module';
-                         script.textContent = code;
-                         document.body.appendChild(script);
-                       } catch(e) { console.error('Babel Error:', e); }
+                         // 1. Babelでコンパイル (import文は残す設定)
+                         const res = Babel.transform(s.innerHTML, { 
+                           presets: [
+                             ['env', { modules: false, targets: { esmodules: true } }], 
+                             'react', 'typescript'
+                           ] 
+                         });
+                         
+                         // 2. type="module" として注入 (これでimportが動く)
+                         const newScript = document.createElement('script');
+                         newScript.type = 'module';
+                         newScript.textContent = res.code;
+                         document.body.appendChild(newScript);
+                       } catch(e) { 
+                         console.error('Compile Error:', e);
+                         document.body.innerHTML += '<div style="color:red">Compile Error: ' + e.message + '</div>';
+                       }
                      });
                    });
                  <\/script>
                `;
-               if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${shimScript}</body>`);
+               if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${runner}</body>`);
             }
-
             setSrcDoc(rawHtml);
-          } catch(e) { setSrcDoc(`<body><div style="color:red;padding:20px;">Preview Setup Error: ${e.message}</div></body>`); }
+          } catch(e) { setSrcDoc(`<body>Error: ${e.message}</body>`); }
         }, [files]);
-
         return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms" title="Preview" />;
       };
 
-      // --- サイドバー (プロジェクト管理) ---
       const Sidebar = ({ isOpen, onClose, projects, onSave, onLoad, onDelete, onClear, onImportJSON }) => {
         const fileInputRef = useRef(null);
         const handleExportJSON = () => {
@@ -246,7 +222,6 @@
         );
       };
 
-      // --- ファイルエクスプローラー ---
       const buildFileTree = (files) => {
         const root = { name: "root", isFolder: true, children: {}, path: "" };
         files.forEach(file => {
