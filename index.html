@@ -8,108 +8,97 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#111827">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
-
-    <!-- 必須ライブラリ -->
+    <!-- ライブラリ -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-
     <script>
       tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: { sans: ['sans-serif'], mono: ['Menlo', 'Monaco', 'Consolas', 'monospace'] },
-            colors: { editor: { bg: '#1e1e1e', sidebar: '#252526', active: '#37373d', border: '#333' } }
-          },
-        },
+        theme: { extend: { colors: { editor: { bg: '#1e1e1e', sidebar: '#252526', active: '#37373d', border: '#333' } } } },
       }
     </script>
     <style>
-      ::-webkit-scrollbar { width: 6px; height: 6px; }
-      ::-webkit-scrollbar-track { background: #1e1e1e; }
-      ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
-      body { margin: 0; overflow: hidden; background-color: #111827; touch-action: manipulation; }
+      body { margin: 0; overflow: hidden; background-color: #111827; }
       #root { height: 100vh; height: 100dvh; }
-      input, textarea, button { font-size: 14px; }
-      textarea::placeholder { color: #555; opacity: 0.5; }
+      input, textarea, button { font-family: sans-serif; }
       .modal-overlay { background-color: rgba(0,0,0,0.7); backdrop-filter: blur(2px); }
     </style>
   </head>
   <body>
     <div id="root" class="w-screen flex flex-col"></div>
-
-    <script type="text/babel" data-presets="react,typescript">
+    <script>
+      "use strict";
+      const e = React.createElement;
       const { useState, useEffect, useRef, useMemo } = React;
 
-      // --- アイコン ---
-      const Icon = ({ path, size = 18, className = "" }) => (
-        <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} dangerouslySetInnerHTML={{ __html: path }} />
-      );
+      // --- Icons ---
+      const Icon = ({ path, size = 18, className = "" }) => e("svg", { xmlns: "http://www.w3.org/2000/svg", width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", className, dangerouslySetInnerHTML: { __html: path } });
       const Icons = {
-        Menu: (p) => <Icon {...p} path='<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>' />,
-        Plus: (p) => <Icon {...p} path='<path d="M5 12h14"/><path d="M12 5v14"/>' />,
-        Trash2: (p) => <Icon {...p} path='<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>' />,
-        Folder: (p) => <Icon {...p} path='<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' />,
-        File: (p) => <Icon {...p} path='<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>' />,
-        Code: (p) => <Icon {...p} path='<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>' />,
-        Play: (p) => <Icon {...p} path='<polygon points="5 3 19 12 5 21 5 3"/>' />,
-        List: (p) => <Icon {...p} path='<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>' />,
-        RotateCcw: (p) => <Icon {...p} path='<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>' />,
-        SelectAll: (p) => <Icon {...p} path='<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>' />,
-        Download: (p) => <Icon {...p} path='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>' />,
-        Upload: (p) => <Icon {...p} path='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>' />,
-        Archive: (p) => <Icon {...p} path='<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>' />,
-        ChevronRight: (p) => <Icon {...p} path='<polyline points="9 18 15 12 9 6"/>' />,
-        ChevronDown: (p) => <Icon {...p} path='<polyline points="6 9 12 15 18 9"/>' />,
-        Github: (p) => <Icon {...p} path='<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>' />,
-        Flash: (p) => <Icon {...p} path='<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' />,
-        Edit: (p) => <Icon {...p} path='<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>' />,
-        NewFolder: (p) => <Icon {...p} path='<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" x2="12" y1="11" y2="17"/><line x1="9" x2="15" y1="14" y2="14"/>' />,
-        X: (p) => <Icon {...p} path='<path d="M18 6 6 18"/><path d="m6 6 12 12"/>' />
+          Menu: p => e(Icon, { ...p, path: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>' }),
+          Plus: p => e(Icon, { ...p, path: '<path d="M5 12h14"/><path d="M12 5v14"/>' }),
+          Trash2: p => e(Icon, { ...p, path: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>' }),
+          Folder: p => e(Icon, { ...p, path: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' }),
+          File: p => e(Icon, { ...p, path: '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>' }),
+          Code: p => e(Icon, { ...p, path: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>' }),
+          Play: p => e(Icon, { ...p, path: '<polygon points="5 3 19 12 5 21 5 3"/>' }),
+          List: p => e(Icon, { ...p, path: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>' }),
+          RotateCcw: p => e(Icon, { ...p, path: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>' }),
+          Github: p => e(Icon, { ...p, path: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>' }),
+          Flash: p => e(Icon, { ...p, path: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' }),
+          Upload: p => e(Icon, { ...p, path: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>' }),
+          Download: p => e(Icon, { ...p, path: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>' }),
+          X: p => e(Icon, { ...p, path: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>' }),
+          Archive: p => e(Icon, { ...p, path: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>' }),
+          NewFolder: p => e(Icon, { ...p, path: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" x2="12" y1="11" y2="17"/><line x1="9" x2="15" y1="14" y2="14"/>' }),
+          Edit: p => e(Icon, { ...p, path: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>' }),
+          ChevronDown: p => e(Icon, { ...p, path: '<polyline points="6 9 12 15 18 9"/>' }),
+          ChevronRight: p => e(Icon, { ...p, path: '<polyline points="9 18 15 12 9 6"/>' }),
+          SelectAll: p => e(Icon, { ...p, path: '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>' })
       };
 
       const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
-      // --- エディタコンポーネント ---
+      // --- Components ---
+
       const Editor = ({ file, onChange }) => {
-        const textareaRef = useRef(null);
-        useEffect(() => { if (textareaRef.current) textareaRef.current.scrollTop = 0; }, [file?.id]);
+        const ref = useRef(null);
+        useEffect(() => { if(ref.current) ref.current.scrollTop = 0; }, [file?.id]);
+        
+        // ★全選択機能
+        const handleSelectAll = () => { if (ref.current) { ref.current.focus(); ref.current.select(); } };
 
-        const handleSelectAll = () => { if (textareaRef.current) { textareaRef.current.focus(); textareaRef.current.select(); } };
-
-        if (!file) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-editor-bg h-full"><Icons.Code size={48} className="mb-4 opacity-20" /><p>ファイルを選択してください</p></div>;
-
-        return (
-          <div className="flex flex-col h-full bg-editor-bg relative group">
-            <div className="flex items-center justify-between px-4 py-2 bg-editor-sidebar border-b border-editor-border shrink-0">
-              <span className="text-sm font-medium text-gray-200">{file.name}</span>
-              <button onClick={handleSelectAll} className="flex flex-col items-center justify-center p-1 text-gray-500 hover:text-white rounded hover:bg-gray-700 w-12 transition-colors" title="全選択">
-                <Icons.SelectAll size={18} />
-              </button>
-            </div>
-            <textarea
-              ref={textareaRef}
-              value={file.content}
-              onChange={(e) => onChange(e.target.value)}
-              className="flex-1 w-full bg-editor-bg text-gray-300 font-mono text-sm p-4 resize-none focus:outline-none leading-6"
-              spellCheck={false}
-              autoCapitalize="off"
-              placeholder="// ここにコードをペースト..."
-            />
-          </div>
+        if (!file) return e("div", { className: "flex-1 flex flex-col items-center justify-center text-gray-500 bg-editor-bg h-full" }, e(Icons.Code, { size: 48, className: "mb-4 opacity-20" }), e("p", null, "ファイルを選択"));
+        
+        return e("div", { className: "flex flex-col h-full bg-editor-bg" },
+          e("div", { className: "flex items-center justify-between px-4 py-2 bg-editor-sidebar border-b border-editor-border shrink-0" }, 
+            e("span", { className: "text-sm text-gray-200" }, file.name),
+            e("button", { onClick: handleSelectAll, className: "p-1 text-gray-500 hover:text-white rounded hover:bg-gray-700 w-12 transition-colors", title: "全選択" }, e(Icons.SelectAll, { size: 18 }))
+          ),
+          e("textarea", { ref, value: file.content, onChange: e => onChange(e.target.value), className: "flex-1 w-full bg-editor-bg text-gray-300 font-mono text-sm p-4 resize-none focus:outline-none", spellCheck: false, autoCapitalize: "off", placeholder: "// ここにコードをペースト..." })
         );
       };
 
-      // --- プレビューエンジン (Hybrid) ---
+      // ★プレビューコンポーネント (修正版)
       const Preview = ({ files }) => {
         const [srcDoc, setSrcDoc] = useState('');
         
         useEffect(() => {
+          // エラー表示用スクリプト (共通)
+          const errorScript = `
+            <script>
+              window.onerror = function(msg, url, line, col, error) {
+                document.body.innerHTML += '<div style="position:fixed;top:0;left:0;right:0;padding:20px;background:#f87171;color:white;z-index:9999;font-family:monospace;">Runtime Error: ' + msg + ' (Line: ' + line + ')</div>';
+                return false;
+              };
+            <\/script>`;
+
           try {
             const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
-            const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'index.js'].includes(f.name));
+            const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
+            
+            // ユーザーのHTMLを取得 (なければデフォルト)
             let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
 
             // CSS Injection
@@ -117,59 +106,76 @@
             const styleTag = `<style>${css} body { background-color: white; }</style>`;
             if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
 
-            // Import Maps & Compilation
-            const localImports = {};
-            const scriptFiles = files.filter(f => /\.(ts|tsx|js|jsx)$/.test(f.name) && !f.name.includes('vite.config'));
-            
-            for (const file of scriptFiles) {
-              try {
-                const result = window.Babel.transform(file.content, { 
-                    presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'], 
-                    filename: file.name 
-                });
-                const blob = new Blob([result.code], { type: 'application/javascript' });
-                const url = URL.createObjectURL(blob);
-                const paths = ["./" + file.name, "/" + file.name, "./" + file.name.replace(/\.(tsx|ts|jsx|js)$/, ''), "/" + file.name.replace(/\.(tsx|ts|jsx|js)$/, '')];
-                paths.forEach(p => localImports[p] = url);
-              } catch (e) { console.error("Compile Error:", file.name, e); }
-            }
-
-            let finalImportMap = { imports: localImports };
-            const match = rawHtml.match(/<script\s+type=["']importmap["']>([\s\S]*?)<\/script>/i);
-            if (match) {
-                try {
-                    const userMap = JSON.parse(match[1]);
-                    finalImportMap.imports = { ...localImports, ...userMap.imports };
-                    rawHtml = rawHtml.replace(match[0], '');
-                } catch(e) {}
-            }
-            if(!finalImportMap.imports["react"]) {
-                 Object.assign(finalImportMap.imports, {
-                    "react": "https://esm.sh/react@18.2.0",
-                    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-                    "react-dom": "https://esm.sh/react-dom@18.2.0",
-                    "lucide-react": "https://esm.sh/lucide-react@0.330.0",
-                    "recharts": "https://esm.sh/recharts@2.12.0",
-                    "@google/genai": "https://esm.sh/@google/genai@0.1.1"
-                 });
-            }
-
-            // Replace Vite entry point with dynamic import
-            if (entryFile) {
-                rawHtml = rawHtml.replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
-                const entryScript = `<script type="module">import "./${entryFile.name}";<\/script>`;
-                if (rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${entryScript}</body>`); else rawHtml += entryScript;
-            }
-
-            const headExtras = `
-              <script type="importmap">${JSON.stringify(finalImportMap, null, 2)}<\/script>
+            // 必須ライブラリ注入
+            const libs = `
               <script src="https://cdn.tailwindcss.com"><\/script>
+              <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
+              <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>
               <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
             `;
-            if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${headExtras}`); else rawHtml = headExtras + rawHtml;
+            if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${errorScript}${libs}`); else rawHtml = errorScript + libs + rawHtml;
+
+            // --- Case 1: Vite Mode (src/main.tsxがある) ---
+            if (entryFile) {
+               const imports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0" };
+               const blobUrls = {};
+               
+               files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name) && !f.name.includes('vite.config')).forEach(file => {
+                  let code = file.content;
+                  if (file.name.endsWith('.css')) {
+                      code = `const s = new CSSStyleSheet(); s.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default s;`;
+                  } else {
+                      try {
+                        code = Babel.transform(file.content, { presets: ['react', 'typescript'], filename: file.name }).code;
+                      } catch(e) { console.error(e); code = `console.error("Compile Error: ${e.message}");`; }
+                  }
+                  const blob = new Blob([code], { type: 'application/javascript' });
+                  const url = URL.createObjectURL(blob);
+                  blobUrls[`./${file.name}`] = url;
+                  blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
+               });
+
+               const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
+               rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`);
+               
+               // Viteエントリポイント置換
+               rawHtml = rawHtml.replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
+               const entryScript = `<script type="module">
+                  document.adoptedStyleSheets = [];
+                  ${files.filter(f => f.name.endsWith('.css')).map((f,i) => `import s${i} from './${f.name}'; document.adoptedStyleSheets.push(s${i});`).join('\n')}
+                  import './${entryFile.name}';
+               <\/script>`;
+               if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${entryScript}</body>`); else rawHtml += entryScript;
+
+            } 
+            // --- Case 2: Classic Mode (単一HTML) ---
+            else {
+               // JSXをブラウザで動かすための調整
+               // <script type="text/babel"> を探して実行させる
+               // また、Babelが自動実行されるように presets を強制付与するハック
+               
+               // もしユーザーが <script> タグに type="text/babel" をつけていなくても、
+               // インラインスクリプトをBabelで処理するようにラップする
+               const babelScript = `
+                 <script>
+                   window.addEventListener('DOMContentLoaded', () => {
+                     const scripts = document.querySelectorAll('script[type="text/babel"]');
+                     scripts.forEach(s => {
+                       try {
+                         const code = Babel.transform(s.innerHTML, { presets: ['react', 'typescript'] }).code;
+                         const script = document.createElement('script');
+                         script.text = code;
+                         document.body.appendChild(script);
+                       } catch(e) { console.error('Babel Error:', e); }
+                     });
+                   });
+                 <\/script>
+               `;
+               if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${babelScript}</body>`);
+            }
 
             setSrcDoc(rawHtml);
-          } catch(e) { console.error(e); setSrcDoc(`<body>Error: ${e.message}</body>`); }
+          } catch(e) { setSrcDoc(`<body><div style="color:red">Preview Setup Error: ${e.message}</div></body>`); }
         }, [files]);
 
         return <iframe srcDoc={srcDoc} className="flex-1 w-full h-full bg-white border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms" title="Preview" />;
