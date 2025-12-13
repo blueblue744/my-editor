@@ -1,28 +1,24 @@
 export default {
   async fetch(request, env) {
-    // まず、通常のファイル（index.htmlなど）を取得
-    const response = await env.ASSETS.fetch(request);
-    const newResponse = new Response(response.body, response);
+    // リクエストされたURLを解析
+    const url = new URL(request.url);
 
-    // WebContainersに必要なヘッダー
-    newResponse.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
-    newResponse.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+    try {
+      // まず、リクエストがプロジェクト内のファイル（アセット）に対するものか試す
+      const response = await env.ASSETS.fetch(request);
 
-    // Content Security Policy (CSP) を設定
-    // これで、信頼できるCDNからのスクリプト読み込みを許可します
-    const csp = [
-      "default-src 'self'",
-      // 必要なCDNドメインをここに追加
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdnjs.cloudflare.com",
-      // WebContainersが内部で通信するドメインを許可
-      "frame-src 'self' https://*.stackblitz.io",
-      "connect-src 'self' https://*.stackblitz.io wss://*.stackblitz.io",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "img-src 'self' data:", // アイコン用のdata: URIを許可
-    ].join('; ');
-    newResponse.headers.set('Content-Security-Policy', csp);
+      // 成功した場合（＝自分のファイルだった場合）、ヘッダーを追加して返す
+      const newResponse = new Response(response.body, response);
+      newResponse.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+      newResponse.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+      return newResponse;
 
-    return newResponse;
-  },
+    } catch (e) {
+      // env.ASSETS.fetchがエラーになった場合、それはプロジェクト内にないファイル、
+      // つまり外部へのリクエスト（CDNなど）を意味する。
+      // その場合は、Cloudflareを介さず、インターネットへ直接取得しに行く。
+      console.log(`Fetching external resource: ${url.href}`);
+      return fetch(request);
+    }
+  }
 };
