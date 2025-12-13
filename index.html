@@ -88,77 +88,78 @@
         );
       };
 
-      // --- プレビューエンジン (Smart Loader) ---
+      // --- ★ プレビューエンジン (Pre-Compiler Mode) ---
       const Preview = ({ files }) => {
         const [srcDoc, setSrcDoc] = useState('');
         
         useEffect(() => {
+          // エラー表示用
+          const errorScript = `
+            <script>
+              window.onerror = function(msg, url, line, col, error) {
+                var div = document.createElement("div");
+                div.style.cssText = "position:fixed;top:0;left:0;width:100%;height:auto;max-height:100%;background:#330000;color:#ff9999;padding:20px;z-index:99999;font-family:monospace;white-space:pre-wrap;overflow:auto;box-sizing:border-box;";
+                div.innerHTML = "<h3>⚠️ Runtime Error</h3>" + msg + "<br><small>Line: " + line + "</small>";
+                document.body.appendChild(div);
+                return false;
+              };
+            <\/script>`;
+
           try {
             const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
             const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
             let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
 
-            // --- モード1: 単一HTMLファイル（野菜ソムリエ/電卓）---
-            // ここが修正点。HTMLそのままだと動かないtext/babelスクリプトを、
-            // 強制的にBabelで変換して実行するローダーを注入する。
-            if (!entryFile && (rawHtml.includes('<!DOCTYPE') || rawHtml.includes('<html'))) {
-               const bootstrapper = `
-               <script>
-                 window.addEventListener('DOMContentLoaded', function() {
-                   // text/babel なスクリプトを探して実行する
-                   var scripts = document.querySelectorAll('script[type="text/babel"]');
-                   scripts.forEach(function(s) {
-                     try {
-                       // Babelで変換 (import文があっても壊れない設定で)
-                       var code = Babel.transform(s.innerHTML, { 
-                         presets: [
-                            ['env', { modules: false, targets: { esmodules: true } }], 
-                            'react', 'typescript'
-                         ],
-                         filename: 'script.tsx'
-                       }).code;
-                       
-                       // 新しいスクリプトタグとして実行
-                       var newScript = document.createElement('script');
-                       newScript.type = 'module';
-                       newScript.textContent = code;
-                       document.body.appendChild(newScript);
-                     } catch(e) {
-                       console.error('CodePlay Compile Error:', e);
-                       document.body.innerHTML += '<div style="color:red;padding:10px;background:white;">Compile Error: ' + e.message + '</div>';
-                     }
-                   });
-                 });
-               <\/script>`;
-               
-               // もしBabelが読み込まれていなければ追加
-               if (!rawHtml.includes('babel.min.js')) {
-                   const babelLib = '<script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>';
-                   if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', '<head>' + babelLib);
-                   else rawHtml = babelLib + rawHtml;
-               }
-
-               if (rawHtml.includes('</body>')) {
-                   setSrcDoc(rawHtml.replace('</body>', bootstrapper + '</body>'));
-               } else {
-                   setSrcDoc(rawHtml + bootstrapper);
-               }
-               return; 
-            }
-
-            // --- モード2: Viteプロジェクト ---
-            
+            // CSS Injection
             const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
             const styleTag = `<style>${css} body { background-color: white; }</style>`;
             if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
 
+            // --- モード1: 単一HTMLファイル（野菜ソムリエ/電卓）---
+            if (!entryFile && (rawHtml.includes('<!DOCTYPE') || rawHtml.includes('<html'))) {
+               // 正規表現で <script type="text/babel"> を探し出し、
+               // プレビュー表示前に Parent(CodePlay) 側でコンパイルして置換する
+               const regex = /<script\s+([^>]*?)type=["']text\/babel["']([^>]*?)>([\s\S]*?)<\/script>/gi;
+               
+               rawHtml = rawHtml.replace(regex, (match, preAttrs, postAttrs, code) => {
+                   try {
+                       // 1. まずBabelでJSX/TSXをJSに変換
+                       const res = Babel.transform(code, { 
+                           presets: [['env', { modules: false }], 'react', 'typescript'],
+                           filename: 'script.tsx' 
+                       });
+                       
+                       // 2. import文が含まれているかチェック
+                       const hasImport = code.includes('import ') || match.includes('data-type="module"');
+                       
+                       // 3. scriptタグを再構築 (Babel済みJSを入れる)
+                       // importがあるなら type="module"、なければ type="text/javascript" (or 無指定)
+                       // 元の type="text/babel" は削除される
+                       const typeAttr = hasImport ? 'type="module"' : '';
+                       
+                       return `<script ${preAttrs} ${typeAttr} ${postAttrs}>${res.code}<\/script>`;
+                   } catch(e) {
+                       console.error(e);
+                       return `<script>document.body.innerHTML += '<div style="color:red">Compile Error: ${e.message}</div>'<\/script>`;
+                   }
+               });
+               
+               // 不要になったBabel Standaloneの読み込みタグを削除（二重実行防止）
+               rawHtml = rawHtml.replace(/<script\s+src=["'].*babel.*["']><\/script>/gi, '');
+
+               setSrcDoc(errorScript + rawHtml);
+               return; 
+            }
+
+            // --- モード2: Viteプロジェクト ---
+            // 必須ライブラリ
             const libs = `
               <script src="https://cdn.tailwindcss.com"><\/script>
               <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
               <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>
               <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
             `;
-            if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${libs}`); else rawHtml = libs + rawHtml;
+            if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${errorScript}${libs}`); else rawHtml = errorScript + libs + rawHtml;
 
             if (entryFile) {
                const imports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0", "@google/genai": "https://esm.sh/@google/genai@0.1.1" };
