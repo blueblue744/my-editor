@@ -103,31 +103,30 @@
           try {
             const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
             
-            // ファイル判定
+            // ★ HTMLファイルの検出ロジックを強化 (ファイル名がhtmlじゃなくても中身がDOCTYPEならHTMLとみなす)
             let entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
-            let rawHtml = fileMap['index.html'] || files.find(f => f.name.endsWith('.html'))?.content || "";
-            
-            // ★重要判定: ユーザーが自分でImportMapを書いているか？
-            const hasUserImportMap = rawHtml.includes('type="importmap"');
+            let rawHtmlFile = files.find(f => f.name.endsWith('.html')) || files.find(f => f.content.includes('<!DOCTYPE html'));
+            let rawHtml = rawHtmlFile ? rawHtmlFile.content : "";
+
+            // ★ ユーザーがImportMapを書いているか判定
+            const hasUserImportMap = rawHtml.includes('importmap');
 
             let isReactMode = false;
             if (mode === 'react') isReactMode = true;
             else if (mode === 'html') isReactMode = false;
             else {
-                // Auto: main.tsxがある、または .tsx/.jsx ファイルがあって index.html がない場合
-                isReactMode = (!!entryFile || (files.some(f => /\.(tsx|jsx)$/.test(f.name)) && !fileMap['index.html']));
+                // Auto: main.tsxがある、かつImportMapがない場合のみReactモード
+                isReactMode = (!!entryFile && !hasUserImportMap);
             }
 
-            // もしユーザーがImportMapを書いているなら、モードに関係なく「HTMLモード(干渉なし)」にする
+            // 強制上書き: ユーザーがImportMapを書いているなら、ReactモードであろうとHTMLモード(干渉なし)にする
             if (hasUserImportMap) isReactMode = false;
 
             let finalContent = "";
 
             if (isReactMode) {
                 // --- CodePlay Managed Mode (Auto-Wrap for React) ---
-                // ここは今まで通り。Reactコンポーネントだけの時にお世話をする。
-                
-                // Virtual Wrapper Logic...
+                // 既存のReact自動補完ロジック
                 let wrapperScript = "";
                 if (!entryFile) {
                     const candidate = files.find(f => /\.(tsx|jsx|js)$/.test(f.name) && !f.name.includes('vite.config'));
@@ -144,16 +143,13 @@
 
                 if (!rawHtml) rawHtml = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div></body></html>`;
 
-                // CSS injection
                 const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
                 const styleTag = `<style>${css} body { background-color: white; margin: 0; }</style>`;
                 if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
 
-                // Libs
                 const libs = `<script src="https://cdn.tailwindcss.com"><\/script><script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script><script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script><script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>`;
                 if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${libs}`); else rawHtml = libs + rawHtml;
 
-                // Blob URLs & Import Map
                 const blobUrls = {};
                 files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name)).forEach(file => {
                     let code = file.content;
@@ -188,31 +184,27 @@
             } else {
                 // --- ★ Standalone HTML Mode (Do NOT interfere) ---
                 // ユーザーが自分でHTMLとImportMapを書いている場合。
-                // CodePlayは「ただのiframe表示器」に徹する。
-                
-                // ただし、利便性のためBabel変換だけは手伝う（ブラウザネイティブではJSXが動かないため）
-                // ユーザーが既にBabel CDNを書いている場合は二重ロードを防ぐ
-                
-                // 1. もしユーザーがImportMapを書いていないなら、最低限のMapだけ入れてあげる（親切心）
-                //    書いてあるなら何もしない（ここが修正点！）
-                if (!hasUserImportMap) {
-                     const defaultImports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0" };
-                     const mapScript = `<script type="importmap">{ "imports": ${JSON.stringify(defaultImports)} }<\/script>`;
-                     if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${mapScript}`); else rawHtml = mapScript + rawHtml;
+                // 1. ファイルの中身が空なら、エラーを表示
+                if (!rawHtml) {
+                    finalContent = `<html><body><div style="color:red; padding:20px;">HTMLファイルが見つかりません。「index.html」を作成するか、ファイル内に &lt;!DOCTYPE html&gt; を記述してください。</div></body></html>`;
+                } else {
+                    // 2. JSXの変換 (ブラウザはJSXを理解できないので、これだけはやる)
+                    const regex = /<script\s+([^>]*?)type=["']text\/babel["']([^>]*?)>([\s\S]*?)<\/script>/gi;
+                    finalContent = rawHtml.replace(regex, (match, preAttrs, postAttrs, code) => {
+                       try {
+                           const res = Babel.transform(code, { presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'], filename: 'script.tsx' });
+                           const hasImport = code.includes('import ') || match.includes('data-type="module"');
+                           return `<script ${preAttrs} ${hasImport ? 'type="module"' : ''} ${postAttrs}>${res.code}<\/script>`;
+                       } catch(e) { return `<script>document.body.innerHTML += '<div style="color:red; position:fixed; top:0; left:0; background:white; z-index:9999;">Babel Error: ${e.message}</div>'<\/script>`; }
+                    });
+
+                    // 3. ユーザーがBabel CDNを書いていたら、二重ロード防止で削除（EditorのBabelで変換済みのため）
+                    finalContent = finalContent.replace(/<script\s+src=["'].*babel.*["']><\/script>/gi, '');
+                    
+                    // 4. エラーハンドリング用のスクリプトを注入
+                    const errorScript = `<script>window.onerror = function(msg, url, line) { document.body.innerHTML += '<div style="color:red; background:white; border:1px solid red; padding:4px; position:fixed; top:0; left:0; z-index:10000;">Runtime Error: ' + msg + ' (Line: ' + line + ')</div>'; };<\/script>`;
+                    if(finalContent.includes('<head>')) finalContent = finalContent.replace('<head>', `<head>${errorScript}`);
                 }
-
-                // 2. JSXの変換 (これはブラウザができないのでCodePlayがやるしかない)
-                const regex = /<script\s+([^>]*?)type=["']text\/babel["']([^>]*?)>([\s\S]*?)<\/script>/gi;
-                finalContent = rawHtml.replace(regex, (match, preAttrs, postAttrs, code) => {
-                   try {
-                       const res = Babel.transform(code, { presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'], filename: 'script.tsx' });
-                       const hasImport = code.includes('import ') || match.includes('data-type="module"');
-                       return `<script ${preAttrs} ${hasImport ? 'type="module"' : ''} ${postAttrs}>${res.code}<\/script>`;
-                   } catch(e) { return `<script>document.body.innerHTML += '<div style="color:red">Error: ${e.message}</div>'<\/script>`; }
-                });
-
-                // Remove CDN babel to avoid double load if user included it
-                finalContent = finalContent.replace(/<script\s+src=["'].*babel.*["']><\/script>/gi, '');
             }
 
             const blob = new Blob([finalContent], { type: 'text/html' });
@@ -310,7 +302,7 @@
           <div className="flex flex-col select-none">
             <div onClick={() => setIsOpen(!isOpen)} className={`group flex justify-between items-center py-1.5 pr-2 cursor-pointer text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors`} style={{ paddingLeft: `${depth * 12 + 6}px` }}>
               <div className="flex items-center gap-1 min-w-0 overflow-hidden"><span className="p-0.5 text-gray-500">{isOpen ? <Icons.ChevronDown size={14}/> : <Icons.ChevronRight size={14}/>}</span><Icons.Folder size={14} className="shrink-0 text-blue-400" /><span className="truncate font-medium">{node.name}</span></div>
-              <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1"><button onClick={(e)=>{e.stopPropagation(); onRenameFolder(node.path, node.name);}} className="text-gray-500 hover:text-white"><Icons.Edit size={13}/></button><button onClick={(e)=>{e.stopPropagation(); if(confirm(`フォルダ削除: ${node.name}?`)) onDeleteFolder(node.path);}} className="text-gray-500 hover:text-red-400"><Icons.Trash2 size={13}/></button></div>
+              <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1"><button onClick={(e)=>{e.stopPropagation(); onRenameFolder(node.path, node.name);}} className="text-gray-500 hover:text-white"><Icons.Edit size={13}/></button><button onClick={(e)=>{e.stopPropagation(); if(confirm(`削除: ${node.name}?`)) onDeleteFolder(node.path);}} className="text-gray-500 hover:text-red-400"><Icons.Trash2 size={13}/></button></div>
             </div>
             {isOpen && <div className="flex flex-col">{children.map((child) => <FileTreeNode key={child.path} node={child} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} depth={depth + 1} />)}</div>}
           </div>
