@@ -1,20 +1,16 @@
 export default {
-  async fetch(request, env, ctx) {
-    // まず、通常通りページを取得する
-    const response = await ctx.next(request);
+  async fetch(request, env) {
+    // 最初に、通常の静的ファイルを取得する
+    const response = await env.ASSETS.fetch(request);
 
-    // レスポンスのヘッダーを書き換える準備
-    const newHeaders = new Headers(response.headers);
+    // ヘッダーを書き換えるために、レスポンスのコピーを作成する
+    const newResponse = new Response(response.body, response);
 
-    // 必須のヘッダーを2つ設定する
-    newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
-    newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
+    // 新しいレスポンスに、必須のヘッダーを2つ追加する
+    newResponse.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+    newResponse.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
 
-    // 新しいヘッダーを適用したレスポンスを返す
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: newHeaders,
-    });
+    // ヘッダーを追加した新しいレスポンスを返す
+    return newResponse;
   },
 };
