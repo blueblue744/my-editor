@@ -89,7 +89,7 @@
         );
       };
 
-      // --- ★ プレビューエンジン (Blob URL方式・最終版) ---
+      // --- ★ プレビューエンジン (Blob URL方式・修正版) ---
       const Preview = ({ files }) => {
         const [previewUrl, setPreviewUrl] = useState('');
         
@@ -104,23 +104,39 @@
             const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
             let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
 
+            // ★ 共通のImport Map定義（単一HTMLモードでもこれを使う）
+            const imports = { 
+                "react": "https://esm.sh/react@18.2.0", 
+                "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", 
+                "react-dom": "https://esm.sh/react-dom@18.2.0", 
+                "lucide-react": "https://esm.sh/lucide-react@0.330.0", 
+                "recharts": "https://esm.sh/recharts@2.12.0", 
+                "@google/genai": "https://esm.sh/@google/genai@0.1.1",
+                "canvas-confetti": "https://esm.sh/canvas-confetti@1.9.2"
+            };
+            const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify(imports)} }<\/script>`;
+
             let finalContent = "";
 
-            // --- モード1: 単一HTMLファイル（野菜ソムリエ/電卓）---
+            // --- モード1: 単一HTMLファイル ---
             if (!entryFile && (rawHtml.includes('<!DOCTYPE') || rawHtml.includes('<html'))) {
-               // 1. CodePlay側で事前にBabelコンパイルを行う
-               // これにより、iframe内でBabelを動かす必要がなくなり、セキュリティ制限を回避できる
+               // ★ 修正: Import MapをHeadに注入
+               if (rawHtml.includes('<head>')) {
+                   rawHtml = rawHtml.replace('<head>', `<head>${importMapScript}`);
+               } else {
+                   rawHtml = importMapScript + rawHtml;
+               }
+
                const regex = /<script\s+([^>]*?)type=["']text\/babel["']([^>]*?)>([\s\S]*?)<\/script>/gi;
                
                finalContent = rawHtml.replace(regex, (match, preAttrs, postAttrs, code) => {
                    try {
-                       // Babel変換 (filename指定でエラー回避)
+                       // Babel変換
                        const res = Babel.transform(code, { 
                            presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'],
                            filename: 'script.tsx' 
                        });
                        
-                       // importがあるかどうかで type="module" か決める
                        const hasImport = code.includes('import ') || match.includes('data-type="module"');
                        const typeAttr = hasImport ? 'type="module"' : ''; // moduleならimportが使える
                        
@@ -131,15 +147,15 @@
                    }
                });
 
-               // 2. 不要なBabel CDN読み込みを削除 (二重読み込み防止)
+               // 不要なBabel CDN読み込みを削除
                finalContent = finalContent.replace(/<script\s+src=["'].*babel.*["']><\/script>/gi, '');
                
-               // 3. エラー表示用スクリプト注入
+               // エラー表示用スクリプト注入
                const errorScript = `<script>window.onerror=function(m,u,l){document.body.innerHTML+='<div style="position:fixed;top:0;left:0;width:100%;background:#500;color:#fff;padding:10px;z-index:9999;">Runtime Error: '+m+' (Line '+l+')</div>';return false;}<\/script>`;
                if(finalContent.includes('<head>')) finalContent = finalContent.replace('<head>', `<head>${errorScript}`); else finalContent = errorScript + finalContent;
 
             }
-            // --- モード2: Viteプロジェクト（Cloudflare用） ---
+            // --- モード2: Viteプロジェクト ---
             else {
                 const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
                 const styleTag = `<style>${css} body { background-color: white; }</style>`;
@@ -154,7 +170,6 @@
                 if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${libs}`); else rawHtml = libs + rawHtml;
 
                 if (entryFile) {
-                    const imports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0", "@google/genai": "https://esm.sh/@google/genai@0.1.1" };
                     const blobUrls = {};
                     
                     files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name) && !f.name.includes('vite.config')).forEach(file => {
@@ -170,8 +185,9 @@
                         blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
                     });
 
-                    const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
-                    rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
+                    // ★ 修正: 共通importsとblobUrlsを結合
+                    const viteImportMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
+                    rawHtml = rawHtml.replace('</head>', `${viteImportMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
                     
                     const entryScript = `<script type="module">
                         document.adoptedStyleSheets = [];
@@ -183,7 +199,7 @@
                 finalContent = rawHtml;
             }
 
-            // ★ Blob URLを使ってiframeに表示（これがSafari対策の要）
+            // ★ Blob URLを使ってiframeに表示
             const blob = new Blob([finalContent], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             setPreviewUrl(url);
