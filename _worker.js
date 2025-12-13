@@ -8,8 +8,8 @@ export default {
     newResponse.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
     newResponse.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
 
-    // CDNからのライブラリ読み込みを特別に許可するヘッダー
-    // 注意: この設定はセキュリティを少し緩めますが、この構成では必須です。
+    // Content Security Policy (CSP) を設定
+    // これで、信頼できるCDNからのスクリプト読み込みを許可します
     const csp = [
       "default-src 'self'",
       // 必要なCDNドメインをここに追加
@@ -19,6 +19,7 @@ export default {
       "connect-src 'self' https://*.stackblitz.io wss://*.stackblitz.io",
       "object-src 'none'",
       "base-uri 'self'",
+      "img-src 'self' data:", // アイコン用のdata: URIを許可
     ].join('; ');
     newResponse.headers.set('Content-Security-Policy', csp);
 
