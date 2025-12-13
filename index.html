@@ -91,95 +91,69 @@
         );
       };
 
-      // --- ★ プレビューエンジン (Blob URL方式・モード切替対応版) ---
+      // --- ★ プレビューエンジン (Blob URL方式・User-First版) ---
       const Preview = ({ files }) => {
         const [previewUrl, setPreviewUrl] = useState('');
         const [mode, setMode] = useState('auto'); // auto, react, html
         const [refreshKey, setRefreshKey] = useState(0);
 
-        useEffect(() => {
-          return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
-        }, [previewUrl]);
+        useEffect(() => { return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }; }, [previewUrl]);
 
         useEffect(() => {
           try {
             const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
             
-            // --- モード判定ロジック ---
+            // ファイル判定
+            let entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
+            let rawHtml = fileMap['index.html'] || files.find(f => f.name.endsWith('.html'))?.content || "";
+            
+            // ★重要判定: ユーザーが自分でImportMapを書いているか？
+            const hasUserImportMap = rawHtml.includes('type="importmap"');
+
             let isReactMode = false;
             if (mode === 'react') isReactMode = true;
             else if (mode === 'html') isReactMode = false;
             else {
-                // Auto: main.tsxがあるか、または .tsx/.jsx ファイルがあって index.html がない場合
-                isReactMode = !!files.find(f => ['src/main.tsx', 'main.tsx', 'index.tsx'].includes(f.name)) || 
-                              (files.some(f => /\.(tsx|jsx)$/.test(f.name)) && !fileMap['index.html']);
+                // Auto: main.tsxがある、または .tsx/.jsx ファイルがあって index.html がない場合
+                isReactMode = (!!entryFile || (files.some(f => /\.(tsx|jsx)$/.test(f.name)) && !fileMap['index.html']));
             }
+
+            // もしユーザーがImportMapを書いているなら、モードに関係なく「HTMLモード(干渉なし)」にする
+            if (hasUserImportMap) isReactMode = false;
 
             let finalContent = "";
 
-            // --- 共通 Import Map (iPhone/Safari対応の肝) ---
-            const imports = { 
-                "react": "https://esm.sh/react@18.2.0", 
-                "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", 
-                "react-dom": "https://esm.sh/react-dom@18.2.0", 
-                "lucide-react": "https://esm.sh/lucide-react@0.330.0", 
-                "recharts": "https://esm.sh/recharts@2.12.0", 
-                "framer-motion": "https://esm.sh/framer-motion@10.16.4",
-                "canvas-confetti": "https://esm.sh/canvas-confetti@1.9.2",
-                "clsx": "https://esm.sh/clsx@2.1.0",
-                "tailwind-merge": "https://esm.sh/tailwind-merge@2.2.1",
-                "@google/genai": "https://esm.sh/@google/genai@0.1.1"
-            };
-
-            // --- モード別処理 ---
             if (isReactMode) {
-                // ★ React/Vite モード
-                // エントリーポイントを探す
-                let entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
+                // --- CodePlay Managed Mode (Auto-Wrap for React) ---
+                // ここは今まで通り。Reactコンポーネントだけの時にお世話をする。
+                
+                // Virtual Wrapper Logic...
                 let wrapperScript = "";
-
-                // エントリーポイントがない場合、最初のtsx/jsxを探して自動ラップする (これが野菜ソムリエを動かす鍵)
                 if (!entryFile) {
                     const candidate = files.find(f => /\.(tsx|jsx|js)$/.test(f.name) && !f.name.includes('vite.config'));
                     if (candidate) {
-                        // 仮想的なエントリーポイントを作成
                         entryFile = { name: 'virtual-main.tsx' };
                         const isDefaultExport = candidate.content.includes('export default');
-                        
                         if (isDefaultExport) {
-                            // App.tsxのようなコンポーネントの場合 -> ラップしてレンダリング
-                            wrapperScript = `
-                                import React from 'react';
-                                import ReactDOM from 'react-dom/client';
-                                import App from './${candidate.name}';
-                                const root = ReactDOM.createRoot(document.getElementById('root'));
-                                root.render(<App />);
-                            `;
+                            wrapperScript = `import React from 'react'; import ReactDOM from 'react-dom/client'; import App from './${candidate.name}'; const root = ReactDOM.createRoot(document.getElementById('root')); root.render(<App />);`;
                         } else {
-                            // すでにReactDOM.createRootなどが書かれている場合 -> そのままインポート
                             wrapperScript = `import './${candidate.name}';`;
                         }
                     }
                 }
 
-                // 基本HTML
-                let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div></body></html>`;
+                if (!rawHtml) rawHtml = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div></body></html>`;
 
-                // CSS処理
+                // CSS injection
                 const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
                 const styleTag = `<style>${css} body { background-color: white; margin: 0; }</style>`;
                 if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
 
-                // ライブラリ
-                const libs = `
-                  <script src="https://cdn.tailwindcss.com"><\/script>
-                  <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
-                  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>
-                  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
-                `;
+                // Libs
+                const libs = `<script src="https://cdn.tailwindcss.com"><\/script><script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script><script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script><script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>`;
                 if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${libs}`); else rawHtml = libs + rawHtml;
 
-                // Blob URL生成
+                // Blob URLs & Import Map
                 const blobUrls = {};
                 files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name)).forEach(file => {
                     let code = file.content;
@@ -191,58 +165,56 @@
                     const blob = new Blob([code], { type: 'application/javascript' });
                     const url = URL.createObjectURL(blob);
                     blobUrls[`./${file.name}`] = url;
-                    blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url; // 拡張子なし対応
+                    blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
                 });
 
-                // Import Map + Entry Script
-                const combinedImports = { ...imports, ...blobUrls };
-                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify(combinedImports)} }<\/script>`;
+                const imports = { 
+                    "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", 
+                    "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0", "framer-motion": "https://esm.sh/framer-motion@10.16.4", 
+                    "canvas-confetti": "https://esm.sh/canvas-confetti@1.9.2", "clsx": "https://esm.sh/clsx@2.1.0", "tailwind-merge": "https://esm.sh/tailwind-merge@2.2.1", 
+                    "@google/genai": "https://esm.sh/@google/genai@0.1.1", ...blobUrls 
+                };
+                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify(imports)} }<\/script>`;
                 rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
 
-                // Virtual Wrapper or Real Entry
                 let entryCode = "";
-                if (wrapperScript) {
-                     // Babel transform wrapper
-                     try { entryCode = Babel.transform(wrapperScript, { presets: ['env', 'react', 'typescript'], filename: 'virtual.tsx' }).code; } catch(e){}
-                } else if (entryFile && blobUrls[`./${entryFile.name}`]) {
-                     entryCode = `import './${entryFile.name}';`;
-                }
+                if (wrapperScript) { try { entryCode = Babel.transform(wrapperScript, { presets: ['env', 'react', 'typescript'], filename: 'virtual.tsx' }).code; } catch(e){} }
+                else if (entryFile && blobUrls[`./${entryFile.name}`]) { entryCode = `import './${entryFile.name}';`; }
 
-                const executionScript = `<script type="module">
-                    document.adoptedStyleSheets = [];
-                    ${files.filter(f => f.name.endsWith('.css')).map((f,i) => `import s${i} from './${f.name}'; document.adoptedStyleSheets.push(s${i});`).join('\n')}
-                    ${entryCode}
-                <\/script>`;
-
+                const executionScript = `<script type="module">document.adoptedStyleSheets = []; ${files.filter(f => f.name.endsWith('.css')).map((f,i) => `import s${i} from './${f.name}'; document.adoptedStyleSheets.push(s${i});`).join('\n')} ${entryCode} <\/script>`;
                 if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${executionScript}</body>`); else rawHtml += executionScript;
                 finalContent = rawHtml;
 
             } else {
-                // ★ HTML (Classic) モード (筆算電卓など)
-                let rawHtml = fileMap['index.html'] || files.find(f => f.name.endsWith('.html'))?.content || "";
+                // --- ★ Standalone HTML Mode (Do NOT interfere) ---
+                // ユーザーが自分でHTMLとImportMapを書いている場合。
+                // CodePlayは「ただのiframe表示器」に徹する。
                 
-                // Import Map注入 (HTMLモードでもimportを使う場合に対応)
-                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify(imports)} }<\/script>`;
-                if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${importMapScript}`); else rawHtml = importMapScript + rawHtml;
+                // ただし、利便性のためBabel変換だけは手伝う（ブラウザネイティブではJSXが動かないため）
+                // ユーザーが既にBabel CDNを書いている場合は二重ロードを防ぐ
+                
+                // 1. もしユーザーがImportMapを書いていないなら、最低限のMapだけ入れてあげる（親切心）
+                //    書いてあるなら何もしない（ここが修正点！）
+                if (!hasUserImportMap) {
+                     const defaultImports = { "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0" };
+                     const mapScript = `<script type="importmap">{ "imports": ${JSON.stringify(defaultImports)} }<\/script>`;
+                     if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${mapScript}`); else rawHtml = mapScript + rawHtml;
+                }
 
-                // Babel Script変換
+                // 2. JSXの変換 (これはブラウザができないのでCodePlayがやるしかない)
                 const regex = /<script\s+([^>]*?)type=["']text\/babel["']([^>]*?)>([\s\S]*?)<\/script>/gi;
                 finalContent = rawHtml.replace(regex, (match, preAttrs, postAttrs, code) => {
                    try {
-                       const res = Babel.transform(code, { 
-                           presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'],
-                           filename: 'script.tsx' 
-                       });
+                       const res = Babel.transform(code, { presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'], filename: 'script.tsx' });
                        const hasImport = code.includes('import ') || match.includes('data-type="module"');
                        return `<script ${preAttrs} ${hasImport ? 'type="module"' : ''} ${postAttrs}>${res.code}<\/script>`;
                    } catch(e) { return `<script>document.body.innerHTML += '<div style="color:red">Error: ${e.message}</div>'<\/script>`; }
                 });
-                
-                // Remove CDN babel to avoid double load
+
+                // Remove CDN babel to avoid double load if user included it
                 finalContent = finalContent.replace(/<script\s+src=["'].*babel.*["']><\/script>/gi, '');
             }
 
-            // iframe表示
             const blob = new Blob([finalContent], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             setPreviewUrl(url);
