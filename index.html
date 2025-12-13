@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>CodePlay Editor</title>
+    <title>CodePlay Editor (WebContainers Engine)</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#111827">
@@ -15,6 +15,9 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <!-- ★★★ ステップ1：WebContainersライブラリを追加 ★★★ -->
+    <script src="https://unpkg.com/@webcontainer/api/dist/index.global.js"></script>
 
     <script>
       tailwind.config = {
@@ -44,7 +47,7 @@
       const { useState, useEffect, useRef, useMemo } = React;
       const e = React.createElement;
 
-      // --- アイコン ---
+      // --- アイコン --- (変更なし)
       const Icon = ({ path, size = 18, className = "" }) => (
         <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} dangerouslySetInnerHTML={{ __html: path }} />
       );
@@ -75,6 +78,7 @@
 
       const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
+      // --- エディタコンポーネント --- (変更なし)
       const Editor = ({ file, onChange }) => {
         const textareaRef = useRef(null);
         useEffect(() => { if (textareaRef.current) textareaRef.current.scrollTop = 0; }, [file?.id]);
@@ -91,148 +95,119 @@
         );
       };
 
-      // --- ★ プレビューエンジン (Blob URL方式・User-First版) ---
-      const Preview = ({ files }) => {
-        const [previewUrl, setPreviewUrl] = useState('');
-        const [mode, setMode] = useState('auto'); // auto, react, html
-        const [refreshKey, setRefreshKey] = useState(0);
+      // --- ★★★ ステップ2：新しいプレビューエンジン (WebContainers版) に置き換え ★★★ ---
+      const WebContainerPreview = ({ files }) => {
+          const [wcInstance, setWcInstance] = useState(null);
+          const [isLoading, setIsLoading] = useState(true);
+          const [statusMessage, setStatusMessage] = useState('Booting WebContainer...');
+          const [previewUrl, setPreviewUrl] = useState('about:blank');
+          
+          const isBooted = useRef(false);
+          const fileChangeDebounce = useRef(null);
+          const currentDevProcess = useRef(null);
 
-        useEffect(() => { return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }; }, [previewUrl]);
+          // 1. 初回レンダリング時にWebContainerを一度だけ起動する
+          useEffect(() => {
+              if (isBooted.current || !window.WebContainer) return;
+              isBooted.current = true;
 
-        useEffect(() => {
-          try {
-            const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
-            
-            // ★ HTMLファイルの検出ロジックを強化 (ファイル名がhtmlじゃなくても中身がDOCTYPEならHTMLとみなす)
-            let entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
-            let rawHtmlFile = files.find(f => f.name.endsWith('.html')) || files.find(f => f.content.includes('<!DOCTYPE html'));
-            let rawHtml = rawHtmlFile ? rawHtmlFile.content : "";
+              const bootWebContainer = async () => {
+                  try {
+                      setStatusMessage('Booting WebContainer...');
+                      const instance = await window.WebContainer.boot();
+                      setWcInstance(instance);
 
-            // ★ ユーザーがImportMapを書いているか判定
-            const hasUserImportMap = rawHtml.includes('importmap');
+                      instance.on('server-ready', (port, url) => {
+                          setStatusMessage(`Server is ready at ${url}`);
+                          setPreviewUrl(url);
+                          setIsLoading(false);
+                      });
 
-            let isReactMode = false;
-            if (mode === 'react') isReactMode = true;
-            else if (mode === 'html') isReactMode = false;
-            else {
-                // Auto: main.tsxがある、かつImportMapがない場合のみReactモード
-                isReactMode = (!!entryFile && !hasUserImportMap);
-            }
+                      instance.on('error', (error) => {
+                          console.error('[WC ERROR]', error.message);
+                          setStatusMessage(`Error: ${error.message}`);
+                      });
 
-            // 強制上書き: ユーザーがImportMapを書いているなら、ReactモードであろうとHTMLモード(干渉なし)にする
-            if (hasUserImportMap) isReactMode = false;
+                  } catch (error) {
+                      setStatusMessage(`Error booting WebContainer: ${error.message}. Ensure correct headers are set.`);
+                      console.error(error);
+                  }
+              };
+              bootWebContainer();
+          }, []);
 
-            let finalContent = "";
+          // 2. ファイルが変更されたら、仮想環境を更新してサーバーを再起動する
+          useEffect(() => {
+              if (!wcInstance || files.length === 0) return;
 
-            if (isReactMode) {
-                // --- CodePlay Managed Mode (Auto-Wrap for React) ---
-                // 既存のReact自動補完ロジック
-                let wrapperScript = "";
-                if (!entryFile) {
-                    const candidate = files.find(f => /\.(tsx|jsx|js)$/.test(f.name) && !f.name.includes('vite.config'));
-                    if (candidate) {
-                        entryFile = { name: 'virtual-main.tsx' };
-                        const isDefaultExport = candidate.content.includes('export default');
-                        if (isDefaultExport) {
-                            wrapperScript = `import React from 'react'; import ReactDOM from 'react-dom/client'; import App from './${candidate.name}'; const root = ReactDOM.createRoot(document.getElementById('root')); root.render(<App />);`;
-                        } else {
-                            wrapperScript = `import './${candidate.name}';`;
-                        }
-                    }
-                }
+              if (fileChangeDebounce.current) {
+                  clearTimeout(fileChangeDebounce.current);
+              }
 
-                if (!rawHtml) rawHtml = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div></body></html>`;
+              fileChangeDebounce.current = setTimeout(async () => {
+                  setIsLoading(true);
+                  setPreviewUrl('about:blank');
 
-                const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
-                const styleTag = `<style>${css} body { background-color: white; margin: 0; }</style>`;
-                if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
+                  try {
+                      if (currentDevProcess.current) {
+                          await currentDevProcess.current.kill();
+                          currentDevProcess.current = null;
+                      }
+                      
+                      setStatusMessage('Writing files to virtual FS...');
+                      for (const file of files) {
+                          const pathParts = file.name.split('/');
+                          if (pathParts.length > 1) {
+                              const dir = pathParts.slice(0, -1).join('/');
+                              await wcInstance.fs.mkdir(dir, { recursive: true });
+                          }
+                          await wcInstance.fs.writeFile(file.name, file.content);
+                      }
+                      
+                      setStatusMessage('Running "npm install"...');
+                      const installProcess = await wcInstance.spawn('npm', ['install']);
+                      installProcess.output.pipeTo(new WritableStream({ write(data) { console.log('[NPM I]', data); } }));
+                      const installExitCode = await installProcess.exit;
+                      if (installExitCode !== 0) {
+                         throw new Error('npm install failed. Check console for details.');
+                      }
 
-                const libs = `<script src="https://cdn.tailwindcss.com"><\/script><script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script><script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script><script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>`;
-                if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${libs}`); else rawHtml = libs + rawHtml;
+                      setStatusMessage('Running "npm run dev"... (Starting Vite)');
+                      const devProcess = await wcInstance.spawn('npm', ['run', 'dev']);
+                      currentDevProcess.current = devProcess;
+                      devProcess.output.pipeTo(new WritableStream({ write(data) { console.log('[VITE]', data); } }));
 
-                const blobUrls = {};
-                files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name)).forEach(file => {
-                    let code = file.content;
-                    if (file.name.endsWith('.css')) {
-                        code = `const s = new CSSStyleSheet(); s.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default s;`;
-                    } else {
-                        try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } catch(e) { console.error(e); }
-                    }
-                    const blob = new Blob([code], { type: 'application/javascript' });
-                    const url = URL.createObjectURL(blob);
-                    blobUrls[`./${file.name}`] = url;
-                    blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
-                });
+                  } catch (error) {
+                      setStatusMessage(`Error: ${error.message}`);
+                      console.error(error);
+                      setIsLoading(false);
+                  }
+              }, 1500);
 
-                const imports = { 
-                    "react": "https://esm.sh/react@18.2.0", "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", "react-dom": "https://esm.sh/react-dom@18.2.0", 
-                    "lucide-react": "https://esm.sh/lucide-react@0.330.0", "recharts": "https://esm.sh/recharts@2.12.0", "framer-motion": "https://esm.sh/framer-motion@10.16.4", 
-                    "canvas-confetti": "https://esm.sh/canvas-confetti@1.9.2", "clsx": "https://esm.sh/clsx@2.1.0", "tailwind-merge": "https://esm.sh/tailwind-merge@2.2.1", 
-                    "@google/genai": "https://esm.sh/@google/genai@0.1.1", ...blobUrls 
-                };
-                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify(imports)} }<\/script>`;
-                rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
+          }, [files, wcInstance]);
 
-                let entryCode = "";
-                if (wrapperScript) { try { entryCode = Babel.transform(wrapperScript, { presets: ['env', 'react', 'typescript'], filename: 'virtual.tsx' }).code; } catch(e){} }
-                else if (entryFile && blobUrls[`./${entryFile.name}`]) { entryCode = `import './${entryFile.name}';`; }
-
-                const executionScript = `<script type="module">document.adoptedStyleSheets = []; ${files.filter(f => f.name.endsWith('.css')).map((f,i) => `import s${i} from './${f.name}'; document.adoptedStyleSheets.push(s${i});`).join('\n')} ${entryCode} <\/script>`;
-                if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${executionScript}</body>`); else rawHtml += executionScript;
-                finalContent = rawHtml;
-
-            } else {
-                // --- ★ Standalone HTML Mode (Do NOT interfere) ---
-                // ユーザーが自分でHTMLとImportMapを書いている場合。
-                // 1. ファイルの中身が空なら、エラーを表示
-                if (!rawHtml) {
-                    finalContent = `<html><body><div style="color:red; padding:20px;">HTMLファイルが見つかりません。「index.html」を作成するか、ファイル内に &lt;!DOCTYPE html&gt; を記述してください。</div></body></html>`;
-                } else {
-                    // 2. JSXの変換 (ブラウザはJSXを理解できないので、これだけはやる)
-                    const regex = /<script\s+([^>]*?)type=["']text\/babel["']([^>]*?)>([\s\S]*?)<\/script>/gi;
-                    finalContent = rawHtml.replace(regex, (match, preAttrs, postAttrs, code) => {
-                       try {
-                           const res = Babel.transform(code, { presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'], filename: 'script.tsx' });
-                           const hasImport = code.includes('import ') || match.includes('data-type="module"');
-                           return `<script ${preAttrs} ${hasImport ? 'type="module"' : ''} ${postAttrs}>${res.code}<\/script>`;
-                       } catch(e) { return `<script>document.body.innerHTML += '<div style="color:red; position:fixed; top:0; left:0; background:white; z-index:9999;">Babel Error: ${e.message}</div>'<\/script>`; }
-                    });
-
-                    // 3. ユーザーがBabel CDNを書いていたら、二重ロード防止で削除（EditorのBabelで変換済みのため）
-                    finalContent = finalContent.replace(/<script\s+src=["'].*babel.*["']><\/script>/gi, '');
-                    
-                    // 4. エラーハンドリング用のスクリプトを注入
-                    const errorScript = `<script>window.onerror = function(msg, url, line) { document.body.innerHTML += '<div style="color:red; background:white; border:1px solid red; padding:4px; position:fixed; top:0; left:0; z-index:10000;">Runtime Error: ' + msg + ' (Line: ' + line + ')</div>'; };<\/script>`;
-                    if(finalContent.includes('<head>')) finalContent = finalContent.replace('<head>', `<head>${errorScript}`);
-                }
-            }
-
-            const blob = new Blob([finalContent], { type: 'text/html' });
-            const url = URL.createObjectURL(blob);
-            setPreviewUrl(url);
-
-          } catch(e) { console.error(e); }
-        }, [files, refreshKey, mode]);
-
-        return (
-          <div className="flex flex-col h-full bg-white">
-            <div className="flex items-center justify-between px-2 py-1 bg-gray-100 border-b border-gray-300 shrink-0 h-8">
-              <div className="flex items-center gap-2">
-                 <span className="text-xs text-gray-500 font-bold flex gap-1 items-center"><Icons.Settings size={12}/> Mode:</span>
-                 <select value={mode} onChange={(e)=>setMode(e.target.value)} className="text-xs bg-white border border-gray-300 rounded px-1 py-0.5 outline-none text-gray-700">
-                    <option value="auto">Auto Detect</option>
-                    <option value="react">React (Module)</option>
-                    <option value="html">HTML (Classic)</option>
-                 </select>
+          return (
+              <div className="flex flex-col h-full bg-gray-800 text-white">
+                  <div className="p-2 bg-gray-900 border-b border-gray-700 text-xs text-center font-mono shrink-0 h-8 flex items-center justify-center truncate">
+                      {statusMessage}
+                  </div>
+                  {isLoading && (
+                      <div className="flex-1 flex items-center justify-center bg-gray-800">
+                          <div className="text-center">
+                              <svg className="animate-spin h-8 w-8 text-white mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                              <p className="font-semibold">Loading Environment...</p>
+                          </div>
+                      </div>
+                  )}
+                  <iframe
+                      src={previewUrl}
+                      className={`flex-1 w-full h-full border-none bg-white ${isLoading ? 'hidden' : 'block'}`}
+                  />
               </div>
-              <button onClick={()=>setRefreshKey(k=>k+1)} className="text-gray-500 hover:text-blue-600" title="Reload"><Icons.Refresh size={14}/></button>
-            </div>
-            <iframe src={previewUrl} className="flex-1 w-full h-full border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-downloads" />
-          </div>
-        );
+          );
       };
 
-      // --- サイドバー ---
+      // --- サイドバー --- (変更なし)
       const Sidebar = ({ isOpen, onClose, projects, onSave, onLoad, onDelete, onClear, onImportJSON }) => {
         const fileInputRef = useRef(null);
         const handleExportJSON = () => {
@@ -274,6 +249,7 @@
         );
       };
 
+      // --- ファイルツリー関連 --- (変更なし)
       const buildFileTree = (files) => {
         const root = { name: "root", isFolder: true, children: {}, path: "" };
         files.forEach(file => {
@@ -287,7 +263,6 @@
         });
         return root;
       };
-
       const FileTreeNode = ({ node, activeFileId, onSelect, onDelete, onRenameFile, onRenameFolder, onDeleteFolder, depth = 0 }) => {
         const [isOpen, setIsOpen] = useState(true);
         if (!node.isFolder) {
@@ -308,7 +283,6 @@
           </div>
         );
       };
-
       const FileExplorer = ({ files, activeFileId, onSelect, onAdd, onDelete, onUpload, onRenameFile, onRenameFolder, onDeleteFolder, onGitHub, onGenerateConfig }) => {
         const [name, setName] = useState('');
         const [isAdding, setIsAdding] = useState(false);
@@ -327,7 +301,7 @@
           <div className="flex flex-col h-full bg-editor-sidebar border-r border-editor-border">
              <div className="p-3 border-b border-editor-border flex flex-col gap-2 shrink-0">
                <div className="flex justify-between items-center"><span className="text-xs font-bold text-gray-400">ファイル一覧</span></div>
-               <button onClick={onGenerateConfig} className="w-full text-[10px] bg-blue-900/50 text-blue-300 border border-blue-800 py-1 rounded hover:bg-blue-800/50 flex items-center justify-center gap-1"><Icons.Flash size={12}/> Cloudflare設定生成</button>
+               <button onClick={onGenerateConfig} className="w-full text-[10px] bg-blue-900/50 text-blue-300 border border-blue-800 py-1 rounded hover:bg-blue-800/50 flex items-center justify-center gap-1"><Icons.Flash size={12}/> Vite設定生成</button>
                <div className="flex gap-1 justify-between pt-1">
                  <button onClick={onGitHub} className="text-gray-400 hover:text-white p-1" title="GitHubへプッシュ"><Icons.Github size={16}/></button>
                  <button onClick={handleDownloadZip} className="text-gray-400 hover:text-white p-1" title="ZIP保存"><Icons.Archive size={16}/></button>
@@ -345,6 +319,7 @@
         );
       };
 
+      // --- GitHubモーダル --- (変更なし)
       const GitHubModal = ({ isOpen, onClose, files }) => {
          const [token, setToken] = useState(localStorage.getItem('cp_gh_token') || '');
          const [repo, setRepo] = useState(localStorage.getItem('cp_gh_repo') || '');
@@ -380,8 +355,8 @@
                  <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-md p-6 shadow-2xl">
                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Icons.Github size={24}/> GitHubへプッシュ</h2>
                      <div className="space-y-3">
-                         <div><label className="text-xs text-gray-400">GitHub Token</label><input value={token} onChange={e=>setToken(e.target.value)} type="password" class="w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1"/></div>
-                         <div><label className="text-xs text-gray-400">Repo (user/repo)</label><input value={repo} onChange={e=>setRepo(e.target.value)} class="w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1"/></div>
+                         <div><label className="text-xs text-gray-400">GitHub Token</label><input value={token} onChange={e=>setToken(e.target.value)} type="password" className="w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1"/></div>
+                         <div><label className="text-xs text-gray-400">Repo (user/repo)</label><input value={repo} onChange={e=>setRepo(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1"/></div>
                          <div className="text-xs font-mono text-green-400 min-h-[20px]">{status}</div>
                          <div className="flex justify-end gap-2 mt-2"><button onClick={onClose} className="px-4 py-2 text-sm text-gray-400">閉じる</button><button onClick={handlePush} disabled={isUploading} className="px-4 py-2 text-sm bg-green-600 text-white rounded font-bold">{isUploading?'...':'Push'}</button></div>
                      </div>
@@ -390,8 +365,8 @@
          );
       };
 
+      // --- Appコンポーネント --- (変更なし)
       const App = () => {
-        const INITIAL_FILES = [];
         const [files, setFiles] = useState(() => { try { return JSON.parse(localStorage.getItem('cp_files') || '[]'); } catch { return []; } });
         const [activeId, setActiveId] = useState(null);
         const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -405,7 +380,7 @@
         useEffect(() => { const h = () => setIsMobile(window.innerWidth < 768); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, []);
 
         const handleRenameFile = (node) => { const n = prompt("ファイル名変更:", node.name); if (n && n !== node.name) setFiles(prev => prev.map(f => f.id === node.id ? { ...f, name: n } : f)); };
-        const handleRenameFolder = (oldP, oldN) => { const n = prompt("フォルダ名変更:", oldN); if (n && n !== oldN) { const pre = oldP + "/", parent = oldP.substring(0, oldP.lastIndexOf('/')), newP = parent ? `${parent}/${n}` : n; setFiles(prev => prev.map(f => f.name.startsWith(pre) ? { ...f, name: f.name.replace(oldP, newP) } : f)); }};
+        const handleRenameFolder = (oldP, oldN) => { const n = prompt("フォルダ名変更:", oldN); if (n && n !== oldN) { const pre = oldP.substring(0, oldP.lastIndexOf('/')), newP = pre ? `${pre}/${n}` : n; setFiles(prev => prev.map(f => f.name.startsWith(oldP + '/') ? { ...f, name: f.name.replace(oldP, newP) } : f)); }};
         const handleDeleteFolder = (path) => setFiles(prev => prev.filter(f => !f.name.startsWith(path + "/")));
         const handleSaveProject = (name) => {
             if(!name) return;
@@ -415,13 +390,16 @@
         };
 
         const handleGenerateConfig = () => {
-            if(files.length > 0 && !confirm('Cloudflare用テンプレートを生成しますか？(上書き注意)')) return;
+            if(files.length > 0 && !confirm('Vite + React用のテンプレートを生成しますか？(現在のファイルは上書きされます)')) return;
             const template = [
-                { name: "package.json", content: JSON.stringify({ "name": "codeplay-app", "private": true, "version": "0.0.0", "type": "module", "scripts": { "dev": "vite", "build": "tsc && vite build", "preview": "vite preview" }, "dependencies": { "lucide-react": "^0.330.0", "react": "^18.2.0", "react-dom": "^18.2.0", "recharts": "^2.12.0", "xlsx": "^0.18.5", "@google/genai": "^0.1.1" }, "devDependencies": { "@types/react": "^18.2.55", "@types/react-dom": "^18.2.19", "@vitejs/plugin-react": "^4.2.1", "autoprefixer": "^10.4.17", "postcss": "^8.4.35", "tailwindcss": "^3.4.1", "typescript": "^5.2.2", "vite": "^5.1.0" } }, null, 2) },
-                { name: "vite.config.ts", content: `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nexport default defineConfig({ plugins: [react()] });` },
-                { name: "index.html", content: `<!DOCTYPE html>\n<html lang="ja">\n<head>\n<meta charset="UTF-8" />\n<meta name="viewport" content="width=device-width, initial-scale=1.0" />\n<title>App</title>\n<script src="https://cdn.tailwindcss.com"><\/script>\n</head>\n<body>\n<div id="root"></div>\n<script type="module" src="/src/main.tsx"><\/script>\n</body>\n</html>` },
-                { name: "src/main.tsx", content: `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>\n);` },
-                { name: "src/App.tsx", content: `import React from 'react';\n\nexport default function App() {\n  return (\n    <div className="p-10 bg-gray-900 min-h-screen text-white flex items-center justify-center">\n      <h1 className="text-3xl font-bold">Hello CodePlay!</h1>\n    </div>\n  );\n}` }
+                { name: "package.json", content: JSON.stringify({ "name": "vite-react-starter", "private": true, "version": "0.0.0", "type": "module", "scripts": { "dev": "vite", "build": "tsc && vite build", "preview": "vite preview" }, "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" }, "devDependencies": { "@types/react": "^18.2.15", "@types/react-dom": "^18.2.7", "@vitejs/plugin-react": "^4.0.3", "typescript": "^5.0.2", "vite": "^4.4.5" } }, null, 2) },
+                { name: "vite.config.ts", content: `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\n// https://vitejs.dev/config/\nexport default defineConfig({ plugins: [react()] })` },
+                { name: "index.html", content: `<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>Vite + React + TS</title>\n  </head>\n  <body>\n    <div id="root"></div>\n    <script type="module" src="/src/main.tsx"></script>\n  </body>\n</html>` },
+                { name: "src/main.tsx", content: `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.tsx'\nimport './index.css'\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n)` },
+                { name: "src/App.tsx", content: `import React from 'react';\n\nexport default function App() {\n  return (\n    <h1 className="text-3xl font-bold underline">Hello world!</h1>\n  );\n}` },
+                { name: "src/index.css", content: `@tailwind base;\n@tailwind components;\n@tailwind utilities;`},
+                { name: "tailwind.config.js", content: `/** @type {import('tailwindcss').Config} */\nexport default {\n  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],\n  theme: { extend: {} },\n  plugins: [],\n}`},
+                { name: "postcss.config.js", content: `export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n}`}
             ];
             const newFiles = template.map(t => ({ id: generateId(), name: t.name, content: t.content }));
             setFiles(newFiles);
@@ -446,7 +424,8 @@
                <div className={`${(isMobile && mobileTab !== 'editor') ? 'hidden' : 'flex'} flex-1 flex-col min-w-0 md:border-r border-editor-border md:max-w-[50%]`}>
                  <Editor file={activeFile} onChange={(val)=>setFiles(files.map(f=>f.id===activeId?{...f, content:val}:f))} />
                </div>
-               <div className={`${(isMobile && mobileTab !== 'preview') ? 'hidden' : 'flex'} flex-1 flex-col bg-white h-full`}><Preview files={files} /></div>
+               {/* ★★★ ステップ2：呼び出し部分を変更 ★★★ */}
+               <div className={`${(isMobile && mobileTab !== 'preview') ? 'hidden' : 'flex'} flex-1 flex-col bg-white h-full`}><WebContainerPreview files={files} /></div>
             </main>
             <div className="md:hidden h-16 bg-editor-sidebar border-t border-editor-border flex items-center justify-around shrink-0 pb-safe z-30">
               <button onClick={()=>setMobileTab('files')} className={`flex flex-col items-center justify-center gap-0.5 w-full h-full ${mobileTab==='files'?'text-blue-400 bg-gray-800':'text-gray-500'}`}><Icons.List size={20}/><span className="text-[10px]">Files</span></button>
@@ -462,4 +441,4 @@
       ReactDOM.createRoot(document.getElementById('root')).render(e(App));
     </script>
   </body>
-</html>
+            </html>
