@@ -3,442 +3,89 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>CodePlay Editor (WebContainers Engine)</title>
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#111827">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
-
-    <!-- 必須ライブラリ -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    
-    <!-- ★★★ ステップ1：WebContainersライブラリを追加 ★★★ -->
-    <script src="https://unpkg.com/@webcontainer/api/dist/index.global.js"></script>
-
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: { sans: ['sans-serif'], mono: ['Menlo', 'Monaco', 'Consolas', 'monospace'] },
-            colors: { editor: { bg: '#1e1e1e', sidebar: '#252526', active: '#37373d', border: '#333' } }
-          },
-        },
-      }
-    </script>
+    <title>CodePlay Editor (Final Hybrid)</title>
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#111827" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>" />
     <style>
-      ::-webkit-scrollbar { width: 6px; height: 6px; }
-      ::-webkit-scrollbar-track { background: #1e1e1e; }
-      ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
-      body { margin: 0; overflow: hidden; background-color: #111827; touch-action: manipulation; }
-      #root { height: 100vh; height: 100dvh; }
-      input, textarea, button, select { font-size: 14px; }
-      textarea::placeholder { color: #555; opacity: 0.5; }
-      .modal-overlay { background-color: rgba(0,0,0,0.7); backdrop-filter: blur(2px); }
+      body{margin:0;overflow:hidden;background-color:#111827;touch-action:manipulation}#root,body,html{height:100%}input,textarea,button,select{font-size:14px}textarea::placeholder{color:#555;opacity:.5}.modal-overlay{background-color:rgba(0,0,0,.7);backdrop-filter:blur(2px)}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#1e1e1e}::-webkit-scrollbar-thumb{background:#444;border-radius:3px}
+      #loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background-color:#111827;color:white;font-family:sans-serif}
     </style>
   </head>
   <body>
-    <div id="root" class="w-screen flex flex-col"></div>
+    <div id="loading-screen">
+        <svg class="animate-spin h-8 w-8 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+        <p>Loading Editor...</p>
+    </div>
+    <div id="root" class="w-screen flex flex-col" style="display: none;"></div>
 
-    <script type="text/babel" data-presets="react,typescript">
-      const { useState, useEffect, useRef, useMemo } = React;
-      const e = React.createElement;
-
-      // --- アイコン --- (変更なし)
-      const Icon = ({ path, size = 18, className = "" }) => (
-        <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} dangerouslySetInnerHTML={{ __html: path }} />
-      );
-      const Icons = {
-        Menu: (p) => <Icon {...p} path='<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>' />,
-        Plus: (p) => <Icon {...p} path='<path d="M5 12h14"/><path d="M12 5v14"/>' />,
-        Trash2: (p) => <Icon {...p} path='<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>' />,
-        Folder: (p) => <Icon {...p} path='<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' />,
-        File: (p) => <Icon {...p} path='<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>' />,
-        Code: (p) => <Icon {...p} path='<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>' />,
-        Play: (p) => <Icon {...p} path='<polygon points="5 3 19 12 5 21 5 3"/>' />,
-        List: (p) => <Icon {...p} path='<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>' />,
-        RotateCcw: (p) => <Icon {...p} path='<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>' />,
-        SelectAll: (p) => <Icon {...p} path='<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>' />,
-        Download: (p) => <Icon {...p} path='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>' />,
-        Upload: (p) => <Icon {...p} path='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>' />,
-        Archive: (p) => <Icon {...p} path='<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>' />,
-        ChevronRight: (p) => <Icon {...p} path='<polyline points="9 18 15 12 9 6"/>' />,
-        ChevronDown: (p) => <Icon {...p} path='<polyline points="6 9 12 15 18 9"/>' />,
-        Github: (p) => <Icon {...p} path='<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>' />,
-        Flash: (p) => <Icon {...p} path='<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' />,
-        Edit: (p) => <Icon {...p} path='<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>' />,
-        NewFolder: (p) => <Icon {...p} path='<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" x2="12" y1="11" y2="17"/><line x1="9" x2="15" y1="14" y2="14"/>' />,
-        X: (p) => <Icon {...p} path='<path d="M18 6 6 18"/><path d="m6 6 12 12"/>' />,
-        Refresh: (p) => <Icon {...p} path='<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>' />,
-        Settings: (p) => <Icon {...p} path='<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>' />
+    <script>
+      // ★★★ あなたのアイデア：ライブラリを文字列として保持し、動的に注入する ★★★
+      const librarySources = {
+        tailwind: `https://cdn.tailwindcss.com`,
+        react: `https://unpkg.com/react@18/umd/react.production.min.js`,
+        reactDOM: `https://unpkg.com/react-dom@18/umd/react-dom.production.min.js`,
+        babel: `https://unpkg.com/@babel/standalone/babel.min.js`,
+        jszip: `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`,
+        webcontainer: `https://unpkg.com/@webcontainer/api/dist/index.global.js`
       };
 
-      const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
-
-      // --- エディタコンポーネント --- (変更なし)
-      const Editor = ({ file, onChange }) => {
-        const textareaRef = useRef(null);
-        useEffect(() => { if (textareaRef.current) textareaRef.current.scrollTop = 0; }, [file?.id]);
-        const handleSelectAll = () => { if (textareaRef.current) { textareaRef.current.focus(); textareaRef.current.select(); } };
-        if (!file) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-editor-bg h-full"><Icons.Code size={48} className="mb-4 opacity-20" /><p>ファイルを選択してください</p></div>;
-        return (
-          <div className="flex flex-col h-full bg-editor-bg relative group">
-            <div className="flex items-center justify-between px-4 py-2 bg-editor-sidebar border-b border-editor-border shrink-0">
-              <span className="text-sm font-medium text-gray-200">{file.name}</span>
-              <button onClick={handleSelectAll} className="flex flex-col items-center justify-center p-1 text-gray-500 hover:text-white rounded hover:bg-gray-700 w-12 transition-colors" title="全選択"><Icons.SelectAll size={18} /></button>
-            </div>
-            <textarea ref={textareaRef} value={file.content} onChange={(e) => onChange(e.target.value)} className="flex-1 w-full bg-editor-bg text-gray-300 font-mono text-sm p-4 resize-none focus:outline-none leading-6" spellCheck={false} autoCapitalize="off" placeholder="// ここにコードをペースト..." />
-          </div>
-        );
-      };
-
-      // --- ★★★ ステップ2：新しいプレビューエンジン (WebContainers版) に置き換え ★★★ ---
-      const WebContainerPreview = ({ files }) => {
-          const [wcInstance, setWcInstance] = useState(null);
-          const [isLoading, setIsLoading] = useState(true);
-          const [statusMessage, setStatusMessage] = useState('Booting WebContainer...');
-          const [previewUrl, setPreviewUrl] = useState('about:blank');
-          
-          const isBooted = useRef(false);
-          const fileChangeDebounce = useRef(null);
-          const currentDevProcess = useRef(null);
-
-          // 1. 初回レンダリング時にWebContainerを一度だけ起動する
-          useEffect(() => {
-              if (isBooted.current || !window.WebContainer) return;
-              isBooted.current = true;
-
-              const bootWebContainer = async () => {
-                  try {
-                      setStatusMessage('Booting WebContainer...');
-                      const instance = await window.WebContainer.boot();
-                      setWcInstance(instance);
-
-                      instance.on('server-ready', (port, url) => {
-                          setStatusMessage(`Server is ready at ${url}`);
-                          setPreviewUrl(url);
-                          setIsLoading(false);
-                      });
-
-                      instance.on('error', (error) => {
-                          console.error('[WC ERROR]', error.message);
-                          setStatusMessage(`Error: ${error.message}`);
-                      });
-
-                  } catch (error) {
-                      setStatusMessage(`Error booting WebContainer: ${error.message}. Ensure correct headers are set.`);
-                      console.error(error);
-                  }
-              };
-              bootWebContainer();
-          }, []);
-
-          // 2. ファイルが変更されたら、仮想環境を更新してサーバーを再起動する
-          useEffect(() => {
-              if (!wcInstance || files.length === 0) return;
-
-              if (fileChangeDebounce.current) {
-                  clearTimeout(fileChangeDebounce.current);
-              }
-
-              fileChangeDebounce.current = setTimeout(async () => {
-                  setIsLoading(true);
-                  setPreviewUrl('about:blank');
-
-                  try {
-                      if (currentDevProcess.current) {
-                          await currentDevProcess.current.kill();
-                          currentDevProcess.current = null;
-                      }
-                      
-                      setStatusMessage('Writing files to virtual FS...');
-                      for (const file of files) {
-                          const pathParts = file.name.split('/');
-                          if (pathParts.length > 1) {
-                              const dir = pathParts.slice(0, -1).join('/');
-                              await wcInstance.fs.mkdir(dir, { recursive: true });
-                          }
-                          await wcInstance.fs.writeFile(file.name, file.content);
-                      }
-                      
-                      setStatusMessage('Running "npm install"...');
-                      const installProcess = await wcInstance.spawn('npm', ['install']);
-                      installProcess.output.pipeTo(new WritableStream({ write(data) { console.log('[NPM I]', data); } }));
-                      const installExitCode = await installProcess.exit;
-                      if (installExitCode !== 0) {
-                         throw new Error('npm install failed. Check console for details.');
-                      }
-
-                      setStatusMessage('Running "npm run dev"... (Starting Vite)');
-                      const devProcess = await wcInstance.spawn('npm', ['run', 'dev']);
-                      currentDevProcess.current = devProcess;
-                      devProcess.output.pipeTo(new WritableStream({ write(data) { console.log('[VITE]', data); } }));
-
-                  } catch (error) {
-                      setStatusMessage(`Error: ${error.message}`);
-                      console.error(error);
-                      setIsLoading(false);
-                  }
-              }, 1500);
-
-          }, [files, wcInstance]);
-
-          return (
-              <div className="flex flex-col h-full bg-gray-800 text-white">
-                  <div className="p-2 bg-gray-900 border-b border-gray-700 text-xs text-center font-mono shrink-0 h-8 flex items-center justify-center truncate">
-                      {statusMessage}
-                  </div>
-                  {isLoading && (
-                      <div className="flex-1 flex items-center justify-center bg-gray-800">
-                          <div className="text-center">
-                              <svg className="animate-spin h-8 w-8 text-white mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                              <p className="font-semibold">Loading Environment...</p>
-                          </div>
-                      </div>
-                  )}
-                  <iframe
-                      src={previewUrl}
-                      className={`flex-1 w-full h-full border-none bg-white ${isLoading ? 'hidden' : 'block'}`}
-                  />
-              </div>
-          );
-      };
-
-      // --- サイドバー --- (変更なし)
-      const Sidebar = ({ isOpen, onClose, projects, onSave, onLoad, onDelete, onClear, onImportJSON }) => {
-        const fileInputRef = useRef(null);
-        const handleExportJSON = () => {
-          const blob = new Blob([JSON.stringify(projects, null, 2)], { type: "application/json" });
-          const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `codeplay_backup_${new Date().toISOString().slice(0,10)}.json`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
-        };
-        const handleFileChange = (e) => {
-          const reader = new FileReader(); reader.onload = (event) => { try { onImportJSON(JSON.parse(event.target.result)); alert("復元しました！"); } catch { alert("エラー"); } }; reader.readAsText(e.target.files[0]); e.target.value = '';
-        };
-        if(!isOpen) return null;
-        return (
-            <div className="fixed inset-0 z-50 flex">
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-                <div className="relative w-80 max-w-[85%] bg-gray-900 border-r border-gray-700 flex flex-col h-full shadow-2xl animate-in slide-in-from-left duration-200">
-                    <div className="p-4 border-b border-gray-800 flex justify-between items-center h-16"><span className="text-white font-bold flex gap-2 items-center"><Icons.Folder size={20} className="text-blue-500"/> プロジェクト</span><button onClick={onClose}><Icons.X size={20} className="text-gray-400"/></button></div>
-                    <div className="p-4 space-y-3 border-b border-gray-800">
-                         <button onClick={onSave} className="w-full bg-blue-600 text-white py-2 rounded text-sm font-bold hover:bg-blue-500">保存する</button>
-                         <div className="flex gap-2">
-                            <button onClick={handleExportJSON} className="flex-1 bg-gray-800 text-gray-300 py-2 rounded text-xs flex items-center justify-center gap-1 border border-gray-700"><Icons.Download size={14}/> バックアップ</button>
-                            <button onClick={()=>fileInputRef.current.click()} className="flex-1 bg-gray-800 text-gray-300 py-2 rounded text-xs flex items-center justify-center gap-1 border border-gray-700"><Icons.Upload size={14}/> 復元</button>
-                            <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".json" className="hidden" />
-                         </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                        {projects.length===0 && <div className="text-center text-gray-500 text-xs mt-10">保存されたプロジェクトはありません</div>}
-                        {projects.map(p => (
-                            <div key={p.id} className="bg-gray-800 p-3 rounded flex justify-between items-center group">
-                                <div onClick={()=>{if(confirm('読み込みますか？(現在の編集内容は失われます)')){onLoad(p);onClose()}}} className="flex-1 cursor-pointer">
-                                    <div className="text-sm font-bold text-gray-200">{p.name}</div>
-                                    <div className="text-xs text-gray-500">{new Date(p.createdAt).toLocaleDateString()}</div>
-                                </div>
-                                <button onClick={()=>onDelete(p.id)} className="text-gray-500 hover:text-red-400 p-2"><Icons.Trash2 size={16}/></button>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="p-4 border-t border-gray-800"><button onClick={onClear} className="w-full text-red-500 text-xs py-2 border border-red-900/30 rounded">全履歴を消去</button></div>
-                </div>
-            </div>
-        );
-      };
-
-      // --- ファイルツリー関連 --- (変更なし)
-      const buildFileTree = (files) => {
-        const root = { name: "root", isFolder: true, children: {}, path: "" };
-        files.forEach(file => {
-          const parts = file.name.split('/');
-          let current = root;
-          parts.forEach((part, index) => {
-            const currentPath = parts.slice(0, index + 1).join('/');
-            if (index === parts.length - 1) current.children[part] = { ...file, isFolder: false, path: file.name };
-            else { if (!current.children[part]) current.children[part] = { name: part, isFolder: true, children: {}, path: currentPath }; current = current.children[part]; }
-          });
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = src;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
         });
-        return root;
-      };
-      const FileTreeNode = ({ node, activeFileId, onSelect, onDelete, onRenameFile, onRenameFolder, onDeleteFolder, depth = 0 }) => {
-        const [isOpen, setIsOpen] = useState(true);
-        if (!node.isFolder) {
-          return <div onClick={() => onSelect(node.id)} className={`group flex justify-between items-center py-1.5 pr-2 cursor-pointer text-sm hover:bg-gray-800 ${activeFileId === node.id ? 'bg-editor-active text-white border-l-2 border-l-blue-500' : 'text-gray-400 border-l-2 border-transparent'}`} style={{ paddingLeft: `${depth * 12 + 12}px` }}>
-                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden"><Icons.File size={14} className="shrink-0 opacity-70" /><span className="truncate">{node.name.split('/').pop()}</span></div>
-                <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1"><button onClick={(e)=>{e.stopPropagation(); onRenameFile(node);}} className="text-gray-500 hover:text-white"><Icons.Edit size={13}/></button><button onClick={(e)=>{e.stopPropagation(); if(confirm(`削除: ${node.name}?`)) onDelete(node.id);}} className="text-gray-500 hover:text-red-400"><Icons.Trash2 size={13}/></button></div>
-             </div>;
+      }
+
+      async function initializeApp() {
+        try {
+          await loadScript(librarySources.tailwind);
+          await loadScript(librarySources.react);
+          await loadScript(librarySources.reactDOM);
+          await loadScript(librarySources.babel);
+          await loadScript(librarySources.jszip);
+          await loadScript(librarySources.webcontainer);
+
+          // 全てのライブラリが読み込まれたら、BabelにReactコードを変換させる
+          const babelScript = document.createElement('script');
+          babelScript.setAttribute('type', 'text/babel');
+          babelScript.setAttribute('data-presets', 'react,typescript');
+          babelScript.innerHTML = document.getElementById('app-source').textContent;
+          document.body.appendChild(babelScript);
+          
+          // ローディング画面を非表示にし、アプリを表示
+          document.getElementById('loading-screen').style.display = 'none';
+          document.getElementById('root').style.display = 'flex';
+
+        } catch (error) {
+          console.error('Failed to load libraries:', error);
+          document.getElementById('loading-screen').innerHTML = '<p style="color:red;">Error: Failed to load required libraries. Please check your network connection.</p>';
         }
-        const children = Object.values(node.children).sort((a, b) => (a.isFolder === b.isFolder ? a.name.localeCompare(b.name) : a.isFolder ? -1 : 1));
-        if (node.name === "root") return <div className="flex flex-col">{children.map((child) => <FileTreeNode key={child.path} node={child} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} depth={0} />)}</div>;
-        return (
-          <div className="flex flex-col select-none">
-            <div onClick={() => setIsOpen(!isOpen)} className={`group flex justify-between items-center py-1.5 pr-2 cursor-pointer text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors`} style={{ paddingLeft: `${depth * 12 + 6}px` }}>
-              <div className="flex items-center gap-1 min-w-0 overflow-hidden"><span className="p-0.5 text-gray-500">{isOpen ? <Icons.ChevronDown size={14}/> : <Icons.ChevronRight size={14}/>}</span><Icons.Folder size={14} className="shrink-0 text-blue-400" /><span className="truncate font-medium">{node.name}</span></div>
-              <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1"><button onClick={(e)=>{e.stopPropagation(); onRenameFolder(node.path, node.name);}} className="text-gray-500 hover:text-white"><Icons.Edit size={13}/></button><button onClick={(e)=>{e.stopPropagation(); if(confirm(`削除: ${node.name}?`)) onDeleteFolder(node.path);}} className="text-gray-500 hover:text-red-400"><Icons.Trash2 size={13}/></button></div>
-            </div>
-            {isOpen && <div className="flex flex-col">{children.map((child) => <FileTreeNode key={child.path} node={child} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} depth={depth + 1} />)}</div>}
-          </div>
-        );
-      };
-      const FileExplorer = ({ files, activeFileId, onSelect, onAdd, onDelete, onUpload, onRenameFile, onRenameFolder, onDeleteFolder, onGitHub, onGenerateConfig }) => {
-        const [name, setName] = useState('');
-        const [isAdding, setIsAdding] = useState(false);
-        const fileInputRef = useRef(null);
-        const fileTree = useMemo(() => buildFileTree(files), [files]);
-        const handleSubmit = (e) => { e.preventDefault(); if(!name)return; onAdd(name, 'text', ''); setName(''); setIsAdding(false); };
-        const handleCreateFolder = () => { const n = prompt("フォルダ名:"); if(n) onAdd(`${n}/.keep`, 'text', ''); };
-        const handleDownloadZip = async () => {
-          if (!window.JSZip) { alert('JSZip library not loaded.'); return; }
-          const zip = new JSZip(); files.forEach(f => { if(!f.name.endsWith('.keep')) zip.file(f.name, f.content); });
-          const content = await zip.generateAsync({type: "blob"});
-          const link = document.createElement('a'); link.href = URL.createObjectURL(content); link.download = `project_${new Date().getTime()}.zip`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
-        };
-        const handleUpload = (e) => { Array.from(e.target.files).forEach(file => { const r = new FileReader(); r.onload = (ev) => onUpload(file.name, ev.target.result, 'text'); r.readAsText(file); }); e.target.value = ''; }
-        return (
-          <div className="flex flex-col h-full bg-editor-sidebar border-r border-editor-border">
-             <div className="p-3 border-b border-editor-border flex flex-col gap-2 shrink-0">
-               <div className="flex justify-between items-center"><span className="text-xs font-bold text-gray-400">ファイル一覧</span></div>
-               <button onClick={onGenerateConfig} className="w-full text-[10px] bg-blue-900/50 text-blue-300 border border-blue-800 py-1 rounded hover:bg-blue-800/50 flex items-center justify-center gap-1"><Icons.Flash size={12}/> Vite設定生成</button>
-               <div className="flex gap-1 justify-between pt-1">
-                 <button onClick={onGitHub} className="text-gray-400 hover:text-white p-1" title="GitHubへプッシュ"><Icons.Github size={16}/></button>
-                 <button onClick={handleDownloadZip} className="text-gray-400 hover:text-white p-1" title="ZIP保存"><Icons.Archive size={16}/></button>
-                 <button onClick={()=>fileInputRef.current.click()} className="text-gray-400 hover:text-white p-1" title="読込"><Icons.Upload size={16}/></button>
-                 <button onClick={handleCreateFolder} className="text-gray-400 hover:text-white p-1" title="フォルダ作成"><Icons.NewFolder size={16}/></button>
-                 <button onClick={()=>setIsAdding(!isAdding)} className="text-gray-400 hover:text-white p-1" title="ファイル追加"><Icons.Plus size={16}/></button>
-               </div>
-               <input type="file" multiple ref={fileInputRef} onChange={handleUpload} className="hidden" />
-             </div>
-             {isAdding && <form onSubmit={handleSubmit} className="p-2 bg-gray-800 shrink-0 border-b border-editor-border"><input value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-900 text-white text-sm p-2 rounded outline-none border border-blue-500" placeholder="例: App.tsx" autoFocus onBlur={()=>{if(!name)setIsAdding(false)}}/></form>}
-             <div className="flex-1 overflow-y-auto group">
-               {files.length === 0 ? <div className="p-4 text-xs text-center text-gray-600">ファイルがありません</div> : <FileTreeNode node={fileTree} activeFileId={activeFileId} onSelect={onSelect} onDelete={onDelete} onRenameFile={onRenameFile} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} />}
-             </div>
-          </div>
-        );
-      };
+      }
 
-      // --- GitHubモーダル --- (変更なし)
-      const GitHubModal = ({ isOpen, onClose, files }) => {
-         const [token, setToken] = useState(localStorage.getItem('cp_gh_token') || '');
-         const [repo, setRepo] = useState(localStorage.getItem('cp_gh_repo') || '');
-         const [branch, setBranch] = useState(localStorage.getItem('cp_gh_branch') || 'main');
-         const [status, setStatus] = useState('');
-         const [isUploading, setIsUploading] = useState(false);
-         const handlePush = async () => {
-             if(!token || !repo) return alert('Tokenとリポジトリ名は必須です');
-             localStorage.setItem('cp_gh_token', token); localStorage.setItem('cp_gh_repo', repo); localStorage.setItem('cp_gh_branch', branch);
-             setIsUploading(true); setStatus('接続中...');
-             try {
-                const headers = { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json' };
-                const repoUrl = `https://api.github.com/repos/${repo}`;
-                let res = await fetch(repoUrl, { headers });
-                if (!res.ok) throw new Error(`リポジトリが見つかりません: ${res.status}`);
-                const validFiles = files.filter(f => !f.name.endsWith('.keep'));
-                for (const file of validFiles) {
-                    setStatus(`Uploading ${file.name}...`);
-                    const content = btoa(unescape(encodeURIComponent(file.content)));
-                    const fileUrl = `${repoUrl}/contents/${file.name}`;
-                    let sha = null;
-                    try { const check = await fetch(fileUrl + `?ref=${branch}`, { headers }); if(check.ok) sha = (await check.json()).sha; } catch(e){}
-                    const body = { message: `Update ${file.name} via CodePlay`, content, branch, ...(sha ? {sha} : {}) };
-                    const put = await fetch(fileUrl, { method: 'PUT', headers, body: JSON.stringify(body) });
-                    if(!put.ok) throw new Error(`Failed: ${file.name}`);
-                }
-                setStatus('完了しました！');
-             } catch(e) { setStatus('Error: ' + e.message); } finally { setIsUploading(false); }
-         };
-         if(!isOpen) return null;
-         return (
-             <div className="fixed inset-0 z-[100] modal-overlay flex items-center justify-center p-4">
-                 <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-md p-6 shadow-2xl">
-                     <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Icons.Github size={24}/> GitHubへプッシュ</h2>
-                     <div className="space-y-3">
-                         <div><label className="text-xs text-gray-400">GitHub Token</label><input value={token} onChange={e=>setToken(e.target.value)} type="password" className="w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1"/></div>
-                         <div><label className="text-xs text-gray-400">Repo (user/repo)</label><input value={repo} onChange={e=>setRepo(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1"/></div>
-                         <div className="text-xs font-mono text-green-400 min-h-[20px]">{status}</div>
-                         <div className="flex justify-end gap-2 mt-2"><button onClick={onClose} className="px-4 py-2 text-sm text-gray-400">閉じる</button><button onClick={handlePush} disabled={isUploading} className="px-4 py-2 text-sm bg-green-600 text-white rounded font-bold">{isUploading?'...':'Push'}</button></div>
-                     </div>
-                 </div>
-             </div>
-         );
-      };
+      window.onload = initializeApp;
+    </script>
 
-      // --- Appコンポーネント --- (変更なし)
-      const App = () => {
-        const [files, setFiles] = useState(() => { try { return JSON.parse(localStorage.getItem('cp_files') || '[]'); } catch { return []; } });
-        const [activeId, setActiveId] = useState(null);
-        const [sidebarOpen, setSidebarOpen] = useState(false);
-        const [mobileTab, setMobileTab] = useState('files');
-        const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-        const [showGithub, setShowGithub] = useState(false);
-        const [projects, setProjects] = useState(() => { try { return JSON.parse(localStorage.getItem('cp_projects')||'[]'); } catch{ return []; } });
-        
-        useEffect(() => localStorage.setItem('cp_projects', JSON.stringify(projects)), [projects]);
-        useEffect(() => localStorage.setItem('cp_files', JSON.stringify(files)), [files]);
-        useEffect(() => { const h = () => setIsMobile(window.innerWidth < 768); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, []);
-
-        const handleRenameFile = (node) => { const n = prompt("ファイル名変更:", node.name); if (n && n !== node.name) setFiles(prev => prev.map(f => f.id === node.id ? { ...f, name: n } : f)); };
-        const handleRenameFolder = (oldP, oldN) => { const n = prompt("フォルダ名変更:", oldN); if (n && n !== oldN) { const pre = oldP.substring(0, oldP.lastIndexOf('/')), newP = pre ? `${pre}/${n}` : n; setFiles(prev => prev.map(f => f.name.startsWith(oldP + '/') ? { ...f, name: f.name.replace(oldP, newP) } : f)); }};
-        const handleDeleteFolder = (path) => setFiles(prev => prev.filter(f => !f.name.startsWith(path + "/")));
-        const handleSaveProject = (name) => {
-            if(!name) return;
-            const newProj = { id: generateId(), name, files, createdAt: Date.now() };
-            setProjects(prev => [newProj, ...prev]);
-            alert('プロジェクトを保存しました');
-        };
-
-        const handleGenerateConfig = () => {
-            if(files.length > 0 && !confirm('Vite + React用のテンプレートを生成しますか？(現在のファイルは上書きされます)')) return;
-            const template = [
-                { name: "package.json", content: JSON.stringify({ "name": "vite-react-starter", "private": true, "version": "0.0.0", "type": "module", "scripts": { "dev": "vite", "build": "tsc && vite build", "preview": "vite preview" }, "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" }, "devDependencies": { "@types/react": "^18.2.15", "@types/react-dom": "^18.2.7", "@vitejs/plugin-react": "^4.0.3", "typescript": "^5.0.2", "vite": "^4.4.5" } }, null, 2) },
-                { name: "vite.config.ts", content: `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\n// https://vitejs.dev/config/\nexport default defineConfig({ plugins: [react()] })` },
-                { name: "index.html", content: `<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>Vite + React + TS</title>\n  </head>\n  <body>\n    <div id="root"></div>\n    <script type="module" src="/src/main.tsx"></script>\n  </body>\n</html>` },
-                { name: "src/main.tsx", content: `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.tsx'\nimport './index.css'\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n)` },
-                { name: "src/App.tsx", content: `import React from 'react';\n\nexport default function App() {\n  return (\n    <h1 className="text-3xl font-bold underline">Hello world!</h1>\n  );\n}` },
-                { name: "src/index.css", content: `@tailwind base;\n@tailwind components;\n@tailwind utilities;`},
-                { name: "tailwind.config.js", content: `/** @type {import('tailwindcss').Config} */\nexport default {\n  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],\n  theme: { extend: {} },\n  plugins: [],\n}`},
-                { name: "postcss.config.js", content: `export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n}`}
-            ];
-            const newFiles = template.map(t => ({ id: generateId(), name: t.name, content: t.content }));
-            setFiles(newFiles);
-            setActiveId(newFiles.find(f => f.name === 'src/App.tsx')?.id);
-        };
-
-        const activeFile = files.find(f => f.id === activeId);
-
-        return (
-          <div className="flex flex-col h-full text-white font-sans bg-gray-900">
-            <header className="bg-editor-sidebar border-b border-editor-border p-1 flex items-center justify-between shrink-0 h-16 z-20 shadow-md">
-               <div className="flex items-center gap-2 pl-1">
-                 <button onClick={()=>setSidebarOpen(true)} className="flex flex-col items-center justify-center p-2 text-gray-400 hover:text-white rounded hover:bg-gray-700 w-14"><Icons.Menu size={20}/><span className="text-[10px] mt-0.5">Menu</span></button>
-                 <div className="flex flex-col justify-center"><span className="font-bold text-base tracking-tight leading-tight">CodePlay</span><span className="text-[10px] text-gray-500 leading-tight">Editor</span></div>
-               </div>
-               <div className="flex items-center gap-1 pr-1"><button onClick={()=>{if(confirm('リセットしますか？')){setFiles([]); setActiveId(null);}}} className="flex flex-col items-center justify-center p-2 text-gray-400 hover:text-white rounded hover:bg-gray-700 w-14"><Icons.RotateCcw size={18}/><span className="text-[10px] mt-0.5">Reset</span></button></div>
-            </header>
-            <main className="flex-1 flex overflow-hidden relative">
-               <div className={`${(isMobile && mobileTab !== 'files') ? 'hidden' : 'flex'} w-full md:w-56 md:flex-none flex-col h-full z-10 border-r border-editor-border bg-editor-sidebar`}>
-                  <FileExplorer files={files} activeFileId={activeId} onSelect={(id)=>{setActiveId(id); if(isMobile) setMobileTab('editor');}} onAdd={(n,l,c)=>setFiles([...files, {id:generateId(), name:n, language:l, content:c||''} ])} onDelete={(id)=>{setFiles(f=>f.filter(x=>x.id!==id)); if(activeId===id) setActiveId(null);}} onUpload={(n,c,l)=>setFiles(prev=>[...prev, {id:generateId(), name:n, language:l, content:c}])} onRenameFile={handleRenameFile} onRenameFolder={handleRenameFolder} onDeleteFolder={handleDeleteFolder} onGitHub={()=>setShowGithub(true)} onGenerateConfig={handleGenerateConfig} />
-               </div>
-               <div className={`${(isMobile && mobileTab !== 'editor') ? 'hidden' : 'flex'} flex-1 flex-col min-w-0 md:border-r border-editor-border md:max-w-[50%]`}>
-                 <Editor file={activeFile} onChange={(val)=>setFiles(files.map(f=>f.id===activeId?{...f, content:val}:f))} />
-               </div>
-               {/* ★★★ ステップ2：呼び出し部分を変更 ★★★ */}
-               <div className={`${(isMobile && mobileTab !== 'preview') ? 'hidden' : 'flex'} flex-1 flex-col bg-white h-full`}><WebContainerPreview files={files} /></div>
-            </main>
-            <div className="md:hidden h-16 bg-editor-sidebar border-t border-editor-border flex items-center justify-around shrink-0 pb-safe z-30">
-              <button onClick={()=>setMobileTab('files')} className={`flex flex-col items-center justify-center gap-0.5 w-full h-full ${mobileTab==='files'?'text-blue-400 bg-gray-800':'text-gray-500'}`}><Icons.List size={20}/><span className="text-[10px]">Files</span></button>
-              <button onClick={()=>setMobileTab('editor')} className={`flex flex-col items-center justify-center gap-0.5 w-full h-full ${mobileTab==='editor'?'text-blue-400 bg-gray-800':'text-gray-500'}`}><Icons.Code size={20}/><span className="text-[10px]">Code</span></button>
-              <button onClick={()=>setMobileTab('preview')} className={`flex flex-col items-center justify-center gap-0.5 w-full h-full ${mobileTab==='preview'?'text-blue-400 bg-gray-800':'text-gray-500'}`}><Icons.Play size={20}/><span className="text-[10px]">Run</span></button>
-            </div>
-            <GitHubModal isOpen={showGithub} onClose={()=>setShowGithub(false)} files={files} />
-            <Sidebar isOpen={sidebarOpen} onClose={()=>setSidebarOpen(false)} projects={projects} onSave={()=>{const n=prompt('プロジェクト名:'); if(n) handleSaveProject(n)}} onLoad={(p)=>{setFiles(p.files); setActiveId(p.files[0]?.id)}} onDelete={(id)=>setProjects(p=>p.filter(x=>x.id!==id))} onClear={()=>{if(confirm('全削除しますか？')) setProjects([])}} onImportJSON={(json)=>setProjects(prev => [...json, ...prev])} />
-          </div>
-        );
-      };
-
-      ReactDOM.createRoot(document.getElementById('root')).render(e(App));
+    <!-- Reactアプリケーションのソースコードをここに格納 -->
+    <script id="app-source" type="text/plain">
+      const { useState, useEffect, useRef, useMemo } = React;
+      
+      const Icon = ({ path, size = 18, className = "" }) => ( React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", className: className, dangerouslySetInnerHTML: { __html: path } }) );
+      const Icons = { Menu: (p) => React.createElement(Icon, { ...p, path: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>' }), Plus: (p) => React.createElement(Icon, { ...p, path: '<path d="M5 12h14"/><path d="M12 5v14"/>' }), Trash2: (p) => React.createElement(Icon, { ...p, path: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>' }), Folder: (p) => React.createElement(Icon, { ...p, path: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' }), File: (p) => React.createElement(Icon, { ...p, path: '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>' }), Code: (p) => React.createElement(Icon, { ...p, path: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>' }), Play: (p) => React.createElement(Icon, { ...p, path: '<polygon points="5 3 19 12 5 21 5 3"/>' }), List: (p) => React.createElement(Icon, { ...p, path: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>' }), RotateCcw: (p) => React.createElement(Icon, { ...p, path: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>' }), SelectAll: (p) => React.createElement(Icon, { ...p, path: '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>' }), Download: (p) => React.createElement(Icon, { ...p, path: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>' }), Upload: (p) => React.createElement(Icon, { ...p, path: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>' }), Archive: (p) => React.createElement(Icon, { ...p, path: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>' }), ChevronRight: (p) => React.createElement(Icon, { ...p, path: '<polyline points="9 18 15 12 9 6"/>' }), ChevronDown: (p) => React.createElement(Icon, { ...p, path: '<polyline points="6 9 12 15 18 9"/>' }), Github: (p) => React.createElement(Icon, { ...p, path: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>' }), Flash: (p) => React.createElement(Icon, { ...p, path: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' }), Edit: (p) => React.createElement(Icon, { ...p, path: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>' }), NewFolder: (p) => React.createElement(Icon, { ...p, path: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" x2="12" y1="11" y2="17"/><line x1="9" x2="15" y1="14" y2="14"/>' }), X: (p) => React.createElement(Icon, { ...p, path: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>' }), Refresh: (p) => React.createElement(Icon, { ...p, path: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>' }), Settings: (p) => React.createElement(Icon, { ...p, path: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>' }) };
+      const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
+      const Editor = ({ file, onChange }) => { const t = useRef(null); useEffect(() => { t.current && (t.current.scrollTop = 0); }, [file?.id]); const o = () => { t.current && (t.current.focus(), t.current.select()); }; return file ? React.createElement("div", { className: "flex flex-col h-full bg-editor-bg relative group" }, React.createElement("div", { className: "flex items-center justify-between px-4 py-2 bg-editor-sidebar border-b border-editor-border shrink-0" }, React.createElement("span", { className: "text-sm font-medium text-gray-200" }, file.name), React.createElement("button", { onClick: o, className: "flex flex-col items-center justify-center p-1 text-gray-500 hover:text-white rounded hover:bg-gray-700 w-12 transition-colors", title: "全選択" }, React.createElement(Icons.SelectAll, { size: 18 }))), React.createElement("textarea", { ref: t, value: file.content, onChange: e => onChange(e.target.value), className: "flex-1 w-full bg-editor-bg text-gray-300 font-mono text-sm p-4 resize-none focus:outline-none leading-6", spellCheck: !1, autoCapitalize: "off", placeholder: "// ここにコードをペースト..." })) : React.createElement("div", { className: "flex-1 flex flex-col items-center justify-center text-gray-500 bg-editor-bg h-full" }, React.createElement(Icons.Code, { size: 48, className: "mb-4 opacity-20" }), React.createElement("p", null, "ファイルを選択してください")); };
+      const WebContainerPreview = ({ files }) => { const [t, o] = useState(null), [n, a] = useState(!0), [i, l] = useState("Initializing..."), [s, c] = useState("about:blank"), u = useRef(!1), d = useRef(null); useEffect(() => { if (u.current || "undefined" == typeof window.WebContainer) return; u.current = !0, async function () { l("Booting WebContainer..."); try { const e = await window.WebContainer.boot(); o(e), e.on("server-ready", (e, t) => { l(`Server ready: ${t}`), c(t), a(!1); }), e.on("error", e => { l(`Error: ${e.message}`), console.error(e); }); } catch (e) { l(`Boot Error: ${e.message}`), console.error(e); } }(); }, []); const m = useRef(null); return useEffect(() => { t && files.length && (d.current && clearTimeout(d.current), d.current = setTimeout(async () => { a(!0), c("about:blank"); try { m.current && (await m.current.kill(), m.current = null), l("Writing files to virtual FS..."), await Promise.all(files.map(e => { const r = e.name.split("/"); return r.length > 1 ? t.fs.mkdir(r.slice(0, -1).join("/"), { recursive: !0 }).then(() => t.fs.writeFile(e.name, e.content)) : t.fs.writeFile(e.name, e.content); })), l('Running "npm install"...'); const e = await t.spawn("npm", ["install"]); if (e.output.pipeTo(new WritableStream({ write(e) { console.log("[NPM I]", e); } })), 0 !== await e.exit) throw new Error("npm install failed. Check console for details."); l('Running "npm run dev"...'); const r = await t.spawn("npm", ["run", "dev"]); m.current = r, r.output.pipeTo(new WritableStream({ write(e) { console.log("[VITE]", e); } })); } catch (e) { l(`Error: ${e.message}`), console.error(e), a(!1); } }, 1500)); }, [files, t]), React.createElement("div", { className: "flex flex-col h-full bg-gray-800 text-white" }, React.createElement("div", { className: "p-2 bg-gray-900 border-b border-gray-700 text-xs text-center font-mono shrink-0 h-8 flex items-center justify-center truncate" }, i), n && React.createElement("div", { className: "flex-1 flex items-center justify-center bg-gray-800" }, React.createElement("div", { className: "text-center" }, React.createElement("svg", { className: "animate-spin h-8 w-8 text-white mx-auto mb-4", xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24" }, React.createElement("circle", { className: "opacity-25", cx: "12", cy: "12", r: "10", stroke: "currentColor", strokeWidth: "4" }), React.createElement("path", { className: "opacity-75", fill: "currentColor", d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" })), React.createElement("p", { className: "font-semibold" }, "Loading Environment..."))), React.createElement("iframe", { src: s, className: `flex-1 w-full h-full border-none bg-white ${n ? "hidden" : "block"}` })); };
+      const Sidebar = ({ isOpen: e, onClose: t, projects: o, onSave: n, onLoad: a, onDelete: i, onClear: l, onImportJSON: s }) => { const c = useRef(null); const u = () => { const e = new Blob([JSON.stringify(o, null, 2)], { type: "application/json" }), t = document.createElement("a"); t.href = URL.createObjectURL(e), t.download = `codeplay_backup_${(new Date).toISOString().slice(0, 10)}.json`, document.body.appendChild(t), t.click(), document.body.removeChild(t); }; const d = e => { const t = new FileReader; t.onload = e => { try { s(JSON.parse(e.target.result)), alert("復元しました！"); } catch { alert("エラー"); } }, t.readAsText(e.target.files[0]), e.target.value = ""; }; return e ? React.createElement("div", { className: "fixed inset-0 z-50 flex" }, React.createElement("div", { className: "fixed inset-0 bg-black/60 backdrop-blur-sm", onClick: t }), React.createElement("div", { className: "relative w-80 max-w-[85%] bg-gray-900 border-r border-gray-700 flex flex-col h-full shadow-2xl animate-in slide-in-from-left duration-200" }, React.createElement("div", { className: "p-4 border-b border-gray-800 flex justify-between items-center h-16" }, React.createElement("span", { className: "text-white font-bold flex gap-2 items-center" }, React.createElement(Icons.Folder, { size: 20, className: "text-blue-500" }), " プロジェクト"), React.createElement("button", { onClick: t }, React.createElement(Icons.X, { size: 20, className: "text-gray-400" }))), React.createElement("div", { className: "p-4 space-y-3 border-b border-gray-800" }, React.createElement("button", { onClick: n, className: "w-full bg-blue-600 text-white py-2 rounded text-sm font-bold hover:bg-blue-500" }, "保存する"), React.createElement("div", { className: "flex gap-2" }, React.createElement("button", { onClick: u, className: "flex-1 bg-gray-800 text-gray-300 py-2 rounded text-xs flex items-center justify-center gap-1 border border-gray-700" }, React.createElement(Icons.Download, { size: 14 }), " バックアップ"), React.createElement("button", { onClick: () => c.current.click(), className: "flex-1 bg-gray-800 text-gray-300 py-2 rounded text-xs flex items-center justify-center gap-1 border border-gray-700" }, React.createElement(Icons.Upload, { size: 14 }), " 復元"), React.createElement("input", { type: "file", ref: c, onChange: d, accept: ".json", className: "hidden" }))), React.createElement("div", { className: "flex-1 overflow-y-auto p-2 space-y-2" }, 0 === o.length && React.createElement("div", { className: "text-center text-gray-500 text-xs mt-10" }, "保存されたプロジェクトはありません"), o.map(e => React.createElement("div", { key: e.id, className: "bg-gray-800 p-3 rounded flex justify-between items-center group" }, React.createElement("div", { onClick: () => { confirm("読み込みますか？(現在の編集内容は失われます)") && (a(e), t()); }, className: "flex-1 cursor-pointer" }, React.createElement("div", { className: "text-sm font-bold text-gray-200" }, e.name), React.createElement("div", { className: "text-xs text-gray-500" }, new Date(e.createdAt).toLocaleDateString())), React.createElement("button", { onClick: () => i(e.id), className: "text-gray-500 hover:text-red-400 p-2" }, React.createElement(Icons.Trash2, { size: 16 }))))), React.createElement("div", { className: "p-4 border-t border-gray-800" }, React.createElement("button", { onClick: l, className: "w-full text-red-500 text-xs py-2 border border-red-900/30 rounded" }, "全履歴を消去")))) : null; };
+      const buildFileTree = e => { const t = { name: "root", isFolder: !0, children: {}, path: "" }; return e.forEach(e => { const o = e.name.split("/"); let n = t; o.forEach((t, a) => { const i = o.slice(0, a + 1).join("/"); a === o.length - 1 ? n.children[t] = { ...e, isFolder: !1, path: e.name } : (n.children[t] || (n.children[t] = { name: t, isFolder: !0, children: {}, path: i }), n = n.children[t]); }); }), t; };
+      const FileTreeNode = ({ node: e, activeFileId: t, onSelect: o, onDelete: n, onRenameFile: a, onRenameFolder: i, onDeleteFolder: l, depth: s = 0 }) => { const [c, u] = useState(!0); if (!e.isFolder) return React.createElement("div", { onClick: () => o(e.id), className: `group flex justify-between items-center py-1.5 pr-2 cursor-pointer text-sm hover:bg-gray-800 ${t === e.id ? "bg-editor-active text-white border-l-2 border-l-blue-500" : "text-gray-400 border-l-2 border-transparent"}`, style: { paddingLeft: `${12 * s + 12}px` } }, React.createElement("div", { className: "flex items-center gap-1.5 min-w-0 overflow-hidden" }, React.createElement(Icons.File, { size: 14, className: "shrink-0 opacity-70" }), React.createElement("span", { className: "truncate" }, e.name.split("/").pop())), React.createElement("div", { className: "flex opacity-0 group-hover:opacity-100 transition-opacity gap-1" }, React.createElement("button", { onClick: t => { t.stopPropagation(), a(e); }, className: "text-gray-500 hover:text-white" }, React.createElement(Icons.Edit, { size: 13 })), React.createElement("button", { onClick: t => { t.stopPropagation(), confirm(`削除: ${e.name}?`) && n(e.id); }, className: "text-gray-500 hover:text-red-400" }, React.createElement(Icons.Trash2, { size: 13 })))); const d = Object.values(e.children).sort((t, o) => t.isFolder === o.isFolder ? t.name.localeCompare(o.name) : t.isFolder ? -1 : 1); return "root" === e.name ? React.createElement("div", { className: "flex flex-col" }, d.map(e => React.createElement(FileTreeNode, { key: e.path, node: e, activeFileId: t, onSelect: o, onDelete: n, onRenameFile: a, onRenameFolder: i, onDeleteFolder: l, depth: 0 }))) : React.createElement("div", { className: "flex flex-col select-none" }, React.createElement("div", { onClick: () => u(!c), className: "group flex justify-between items-center py-1.5 pr-2 cursor-pointer text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors", style: { paddingLeft: `${12 * s + 6}px` } }, React.createElement("div", { className: "flex items-center gap-1 min-w-0 overflow-hidden" }, React.createElement("span", { className: "p-0.5 text-gray-500" }, c ? React.createElement(Icons.ChevronDown, { size: 14 }) : React.createElement(Icons.ChevronRight, { size: 14 })), React.createElement(Icons.Folder, { size: 14, className: "shrink-0 text-blue-400" }), React.createElement("span", { className: "truncate font-medium" }, e.name)), React.createElement("div", { className: "flex opacity-0 group-hover:opacity-100 transition-opacity gap-1" }, React.createElement("button", { onClick: e => { e.stopPropagation(), i(e.path, e.name); }, className: "text-gray-500 hover:text-white" }, React.createElement(Icons.Edit, { size: 13 })), React.createElement("button", { onClick: e => { e.stopPropagation(), confirm(`削除: ${e.name}?`) && l(e.path); }, className: "text-gray-500 hover:text-red-400" }, React.createElement(Icons.Trash2, { size: 13 })))), c && React.createElement("div", { className: "flex flex-col" }, d.map(e => React.createElement(FileTreeNode, { key: e.path, node: e, activeFileId: t, onSelect: o, onDelete: n, onRenameFile: a, onRenameFolder: i, onDeleteFolder: l, depth: s + 1 })))); };
+      const FileExplorer = ({ files: e, activeFileId: t, onSelect: o, onAdd: n, onDelete: a, onUpload: i, onRenameFile: l, onRenameFolder: s, onDeleteFolder: c, onGitHub: u, onGenerateConfig: d }) => { const [m, p] = useState(""), [f, h] = useState(!1), g = useRef(null), b = useMemo(() => buildFileTree(e), [e]); const k = t => { t.preventDefault(), m && (n(m, "text", ""), p(""), h(!1)); }; const v = () => { const e = prompt("フォルダ名:"); e && n(`${e}/.keep`, "text", ""); }; const y = async () => { if (!window.JSZip) return void alert("JSZip library not loaded."); const t = new JSZip; e.forEach(e => { e.name.endsWith(".keep") || t.file(e.name, e.content); }); const o = await t.generateAsync({ type: "blob" }), n = document.createElement("a"); n.href = URL.createObjectURL(o), n.download = `project_${(new Date).getTime()}.zip`, document.body.appendChild(n), n.click(), document.body.removeChild(n); }; const w = e => { Array.from(e.target.files).forEach(e => { const t = new FileReader; t.onload = t => i(e.name, t.target.result, "text"), t.readAsText(e); }), e.target.value = ""; }; return React.createElement("div", { className: "flex flex-col h-full bg-editor-sidebar border-r border-editor-border" }, React.createElement("div", { className: "p-3 border-b border-editor-border flex flex-col gap-2 shrink-0" }, React.createElement("div", { className: "flex justify-between items-center" }, React.createElement("span", { className: "text-xs font-bold text-gray-400" }, "ファイル一覧")), React.createElement("button", { onClick: d, className: "w-full text-[10px] bg-blue-900/50 text-blue-300 border border-blue-800 py-1 rounded hover:bg-blue-800/50 flex items-center justify-center gap-1" }, React.createElement(Icons.Flash, { size: 12 }), " Vite設定生成"), React.createElement("div", { className: "flex gap-1 justify-between pt-1" }, React.createElement("button", { onClick: u, className: "text-gray-400 hover:text-white p-1", title: "GitHubへプッシュ" }, React.createElement(Icons.Github, { size: 16 })), React.createElement("button", { onClick: y, className: "text-gray-400 hover:text-white p-1", title: "ZIP保存" }, React.createElement(Icons.Archive, { size: 16 })), React.createElement("button", { onClick: () => g.current.click(), className: "text-gray-400 hover:text-white p-1", title: "読込" }, React.createElement(Icons.Upload, { size: 16 })), React.createElement("button", { onClick: v, className: "text-gray-400 hover:text-white p-1", title: "フォルダ作成" }, React.createElement(Icons.NewFolder, { size: 16 })), React.createElement("button", { onClick: () => h(!f), className: "text-gray-400 hover:text-white p-1", title: "ファイル追加" }, React.createElement(Icons.Plus, { size: 16 }))), React.createElement("input", { type: "file", multiple: !0, ref: g, onChange: w, className: "hidden" })), f && React.createElement("form", { onSubmit: k, className: "p-2 bg-gray-800 shrink-0 border-b border-editor-border" }, React.createElement("input", { value: m, onChange: e => p(e.target.value), className: "w-full bg-gray-900 text-white text-sm p-2 rounded outline-none border border-blue-500", placeholder: "例: App.tsx", autoFocus: !0, onBlur: () => { m || h(!1); } })), React.createElement("div", { className: "flex-1 overflow-y-auto group" }, 0 === e.length ? React.createElement("div", { className: "p-4 text-xs text-center text-gray-600" }, "ファイルがありません") : React.createElement(FileTreeNode, { node: b, activeFileId: t, onSelect: o, onDelete: a, onRenameFile: l, onRenameFolder: s, onDeleteFolder: c }))); };
+      const GitHubModal = ({ isOpen: e, onClose: t, files: o }) => { const [n, a] = useState(localStorage.getItem("cp_gh_token") || ""), [i, l] = useState(localStorage.getItem("cp_gh_repo") || ""), [s, c] = useState(localStorage.getItem("cp_gh_branch") || "main"), [u, d] = useState(""), [m, p] = useState(!1); const f = async () => { if (!n || !i) return alert("Tokenとリポジトリ名は必須です"); localStorage.setItem("cp_gh_token", n), localStorage.setItem("cp_gh_repo", i), localStorage.setItem("cp_gh_branch", s), p(!0), d("接続中..."); try { const e = { Authorization: `token ${n}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" }, t = `https://api.github.com/repos/${i}`; if (!(await fetch(t, { headers: e })).ok) throw new Error(`リポジトリが見つかりません: ${res.status}`); const a = o.filter(e => !e.name.endsWith(".keep")); for (const o of a) { d(`Uploading ${o.name}...`); const n = btoa(unescape(encodeURIComponent(o.content))), a = `${t}/contents/${o.name}`; let c = null; try { (await fetch(a + `?ref=${s}`, { headers: e })).ok && (c = (await (await fetch(a + `?ref=${s}`, { headers: e })).json()).sha); } catch (e) { } const u = { message: `Update ${o.name} via CodePlay`, content: n, branch: s, ...c ? { sha: c } : {} }; if (!(await fetch(a, { method: "PUT", headers: e, body: JSON.stringify(u) })).ok) throw new Error(`Failed: ${o.name}`); } d("完了しました！"); } catch (e) { d("Error: " + e.message); } finally { p(!1); } }; return e ? React.createElement("div", { className: "fixed inset-0 z-[100] modal-overlay flex items-center justify-center p-4" }, React.createElement("div", { className: "bg-gray-900 border border-gray-700 rounded-lg w-full max-w-md p-6 shadow-2xl" }, React.createElement("h2", { className: "text-xl font-bold text-white mb-4 flex items-center gap-2" }, React.createElement(Icons.Github, { size: 24 }), " GitHubへプッシュ"), React.createElement("div", { className: "space-y-3" }, React.createElement("div", null, React.createElement("label", { className: "text-xs text-gray-400" }, "GitHub Token"), React.createElement("input", { value: n, onChange: e => a(e.target.value), type: "password", className: "w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1" })), React.createElement("div", null, React.createElement("label", { className: "text-xs text-gray-400" }, "Repo (user/repo)"), React.createElement("input", { value: i, onChange: e => l(e.target.value), className: "w-full bg-gray-800 text-white p-2 rounded border border-gray-700 mt-1" })), React.createElement("div", { className: "text-xs font-mono text-green-400 min-h-[20px]" }, u), React.createElement("div", { className: "flex justify-end gap-2 mt-2" }, React.createElement("button", { onClick: t, className: "px-4 py-2 text-sm text-gray-400" }, "閉じる"), React.createElement("button", { onClick: f, disabled: m, className: "px-4 py-2 text-sm bg-green-600 text-white rounded font-bold" }, m ? "..." : "Push"))))) : null; };
+      const App = () => { const [e, t] = useState(() => { try { return JSON.parse(localStorage.getItem("cp_files") || "[]"); } catch { return []; } }), [o, n] = useState(null), [a, i] = useState(!1), [l, s] = useState("files"), [c, u] = useState(window.innerWidth < 768), [d, m] = useState(!1), [p, f] = useState(() => { try { return JSON.parse(localStorage.getItem("cp_projects") || "[]"); } catch { return []; } }); useEffect(() => { localStorage.setItem("cp_projects", JSON.stringify(p)); }, [p]), useEffect(() => { localStorage.setItem("cp_files", JSON.stringify(e)); }, [e]), useEffect(() => { const e = () => u(window.innerWidth < 768); return window.addEventListener("resize", e), () => window.removeEventListener("resize", e); }, []); const h = e => { const o = prompt("ファイル名変更:", e.name); o && o !== e.name && t(t => t.map(t => t.id === e.id ? { ...t, name: o } : t)); }, g = (o, n) => { const a = prompt("フォルダ名変更:", n); if (a && a !== n) { const n = o + "/", i = o.substring(0, o.lastIndexOf("/")), l = i ? `${i}/${a}` : a; t(e => e.map(e => e.name.startsWith(n) ? { ...e, name: e.name.replace(o, l) } : e)); } }, b = e => { t(t => t.filter(t => !t.name.startsWith(e + "/"))); }, k = o => { if (o) { const n = { id: generateId(), name: o, files: e, createdAt: Date.now() }; f(e => [n, ...e]), alert("プロジェクトを保存しました"); } }; const v = () => { if (e.length > 0 && !confirm("Vite + React用のテンプレートを生成しますか？(現在のファイルは上書きされます)")) return; const o = [{ name: "package.json", content: JSON.stringify({ name: "vite-react-starter", private: !0, version: "0.0.0", type: "module", scripts: { dev: "vite", build: "tsc && vite build", preview: "vite preview" }, dependencies: { react: "^18.2.0", "react-dom": "^18.2.0" }, devDependencies: { "@types/react": "^18.2.15", "@types/react-dom": "^18.2.7", "@vitejs/plugin-react": "^4.0.3", typescript: "^5.0.2", vite: "^4.4.5", tailwindcss: "^3.4.0", postcss: "^8.4.32", autoprefixer: "^10.4.16" } }, null, 2) }, { name: "vite.config.ts", content: "import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()] })" }, { name: "index.html", content: '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <link rel="icon" type="image/svg+xml" href="/vite.svg" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>Vite App</title>\n  </head>\n  <body>\n    <div id="root"></div>\n    <script type="module" src="/src/main.tsx"></script>\n  </body>\n</html>' }, { name: "src/main.tsx", content: "import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.tsx'\nimport './index.css'\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n)" }, { name: "src/App.tsx", content: 'import React from "react";\n\nexport default function App() {\n  return (\n    <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">\n      <h1 className="text-4xl font-bold">Hello Vite + React!</h1>\n    </div>\n  );\n}' }, { name: "src/index.css", content: "@tailwind base;\n@tailwind components;\n@tailwind utilities;" }, { name: "tailwind.config.js", content: "/** @type {import('tailwindcss').Config} */\nexport default {\n  content: [\"./index.html\", \"./src/**/*.{js,ts,jsx,tsx}\"],\n  theme: { extend: {} },\n  plugins: [],\n}" }, { name: "postcss.config.js", content: "export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n}" }]; const a = o.map(e => ({ id: generateId(), name: e.name, content: e.content })); t(a), n(a.find(e => "src/App.tsx" === e.name)?.id); }; const y = e.find(e => e.id === o); return React.createElement("div", { className: "flex flex-col h-full text-white font-sans bg-gray-900" }, React.createElement("header", { className: "bg-editor-sidebar border-b border-editor-border p-1 flex items-center justify-between shrink-0 h-16 z-20 shadow-md" }, React.createElement("div", { className: "flex items-center gap-2 pl-1" }, React.createElement("button", { onClick: () => i(!0), className: "flex flex-col items-center justify-center p-2 text-gray-400 hover:text-white rounded hover:bg-gray-700 w-14" }, React.createElement(Icons.Menu, { size: 20 }), React.createElement("span", { className: "text-[10px] mt-0.5" }, "Menu")), React.createElement("div", { className: "flex flex-col justify-center" }, React.createElement("span", { className: "font-bold text-base tracking-tight leading-tight" }, "CodePlay"), React.createElement("span", { className: "text-[10px] text-gray-500 leading-tight" }, "Editor"))), React.createElement("div", { className: "flex items-center gap-1 pr-1" }, React.createElement("button", { onClick: () => { confirm("リセットしますか？") && (t([]), n(null)); }, className: "flex flex-col items-center justify-center p-2 text-gray-400 hover:text-white rounded hover:bg-gray-700 w-14" }, React.createElement(Icons.RotateCcw, { size: 18 }), React.createElement("span", { className: "text-[10px] mt-0.5" }, "Reset")))), React.createElement("main", { className: "flex-1 flex overflow-hidden relative" }, React.createElement("div", { className: `${c && "files" !== l ? "hidden" : "flex"} w-full md:w-56 md:flex-none flex-col h-full z-10 border-r border-editor-border bg-editor-sidebar` }, React.createElement(FileExplorer, { files: e, activeFileId: o, onSelect: e => { n(e), c && s("editor"); }, onAdd: (o, a, i) => { t([...e, { id: generateId(), name: o, language: a, content: i || "" }]); }, onDelete: e => { t(t => t.filter(t => t.id !== e)), o === e && n(null); }, onUpload: (o, a, i) => { t(e => [...e, { id: generateId(), name: o, language: i, content: a }]); }, onRenameFile: h, onRenameFolder: g, onDeleteFolder: b, onGitHub: () => m(!0), onGenerateConfig: v })), React.createElement("div", { className: `${c && "editor" !== l ? "hidden" : "flex"} flex-1 flex-col min-w-0 md:border-r border-editor-border md:max-w-[50%]` }, React.createElement(Editor, { file: y, onChange: o => { t(e.map(t => t.id === y.id ? { ...t, content: o } : t)); } })), React.createElement("div", { className: `${c && "preview" !== l ? "hidden" : "flex"} flex-1 flex-col bg-white h-full` }, React.createElement(WebContainerPreview, { files: e }))), React.createElement("div", { className: "md:hidden h-16 bg-editor-sidebar border-t border-editor-border flex items-center justify-around shrink-0 pb-safe z-30" }, React.createElement("button", { onClick: () => s("files"), className: `flex flex-col items-center justify-center gap-0.5 w-full h-full ${"files" === l ? "text-blue-400 bg-gray-800" : "text-gray-500"}` }, React.createElement(Icons.List, { size: 20 }), React.createElement("span", { className: "text-[10px]" }, "Files")), React.createElement("button", { onClick: () => s("editor"), className: `flex flex-col items-center justify-center gap-0.5 w-full h-full ${"editor" === l ? "text-blue-400 bg-gray-800" : "text-gray-500"}` }, React.createElement(Icons.Code, { size: 20 }), React.createElement("span", { className: "text-[10px]" }, "Code")), React.createElement("button", { onClick: () => s("preview"), className: `flex flex-col items-center justify-center gap-0.5 w-full h-full ${"preview" === l ? "text-blue-400 bg-gray-800" : "text-gray-500"}` }, React.createElement(Icons.Play, { size: 20 }), React.createElement("span", { className: "text-[10px]" }, "Run"))), React.createElement(GitHubModal, { isOpen: d, onClose: () => m(!1), files: e }), React.createElement(Sidebar, { isOpen: a, onClose: () => i(!1), projects: p, onSave: () => { const e = prompt("プロジェクト名:"); e && k(e); }, onLoad: e => { t(e.files), n(e.files[0]?.id); }, onDelete: e => { f(t => t.filter(t => t.id !== e)); }, onClear: () => { confirm("全削除しますか？") && f([]); }, onImportJSON: e => { f(t => [...e, ...t]); } })); };
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
     </script>
   </body>
-            </html>
+</html>
