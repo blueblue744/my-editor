@@ -32,7 +32,7 @@
       ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
       body { margin: 0; overflow: hidden; background-color: #111827; touch-action: manipulation; }
       #root { height: 100vh; height: 100dvh; }
-      input, textarea, button { font-size: 14px; }
+      input, textarea, button, select { font-size: 14px; }
       textarea::placeholder { color: #555; opacity: 0.5; }
       .modal-overlay { background-color: rgba(0,0,0,0.7); backdrop-filter: blur(2px); }
     </style>
@@ -68,7 +68,9 @@
         Flash: (p) => <Icon {...p} path='<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' />,
         Edit: (p) => <Icon {...p} path='<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>' />,
         NewFolder: (p) => <Icon {...p} path='<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" x2="12" y1="11" y2="17"/><line x1="9" x2="15" y1="14" y2="14"/>' />,
-        X: (p) => <Icon {...p} path='<path d="M18 6 6 18"/><path d="m6 6 12 12"/>' />
+        X: (p) => <Icon {...p} path='<path d="M18 6 6 18"/><path d="m6 6 12 12"/>' />,
+        Refresh: (p) => <Icon {...p} path='<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>' />,
+        Settings: (p) => <Icon {...p} path='<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>' />
       };
 
       const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -89,78 +91,86 @@
         );
       };
 
-      // --- ★ プレビューエンジン (Blob URL方式・修正版) ---
+      // --- ★ プレビューエンジン (Blob URL方式・モード切替対応版) ---
       const Preview = ({ files }) => {
         const [previewUrl, setPreviewUrl] = useState('');
-        
+        const [mode, setMode] = useState('auto'); // auto, react, html
+        const [refreshKey, setRefreshKey] = useState(0);
+
         useEffect(() => {
-          // メモリリーク防止のため古いURLを解放
           return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
-        }, []);
+        }, [previewUrl]);
 
         useEffect(() => {
           try {
             const fileMap = {}; files.forEach(f => fileMap[f.name] = f.content);
-            const entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
-            let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>`;
+            
+            // --- モード判定ロジック ---
+            let isReactMode = false;
+            if (mode === 'react') isReactMode = true;
+            else if (mode === 'html') isReactMode = false;
+            else {
+                // Auto: main.tsxがあるか、または .tsx/.jsx ファイルがあって index.html がない場合
+                isReactMode = !!files.find(f => ['src/main.tsx', 'main.tsx', 'index.tsx'].includes(f.name)) || 
+                              (files.some(f => /\.(tsx|jsx)$/.test(f.name)) && !fileMap['index.html']);
+            }
 
-            // ★ 共通のImport Map定義（単一HTMLモードでもこれを使う）
+            let finalContent = "";
+
+            // --- 共通 Import Map (iPhone/Safari対応の肝) ---
             const imports = { 
                 "react": "https://esm.sh/react@18.2.0", 
                 "react-dom/client": "https://esm.sh/react-dom@18.2.0/client", 
                 "react-dom": "https://esm.sh/react-dom@18.2.0", 
                 "lucide-react": "https://esm.sh/lucide-react@0.330.0", 
                 "recharts": "https://esm.sh/recharts@2.12.0", 
-                "@google/genai": "https://esm.sh/@google/genai@0.1.1",
-                "canvas-confetti": "https://esm.sh/canvas-confetti@1.9.2"
+                "framer-motion": "https://esm.sh/framer-motion@10.16.4",
+                "canvas-confetti": "https://esm.sh/canvas-confetti@1.9.2",
+                "clsx": "https://esm.sh/clsx@2.1.0",
+                "tailwind-merge": "https://esm.sh/tailwind-merge@2.2.1",
+                "@google/genai": "https://esm.sh/@google/genai@0.1.1"
             };
-            const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify(imports)} }<\/script>`;
 
-            let finalContent = "";
+            // --- モード別処理 ---
+            if (isReactMode) {
+                // ★ React/Vite モード
+                // エントリーポイントを探す
+                let entryFile = files.find(f => ['src/main.tsx', 'src/index.tsx', 'main.tsx'].includes(f.name));
+                let wrapperScript = "";
 
-            // --- モード1: 単一HTMLファイル ---
-            if (!entryFile && (rawHtml.includes('<!DOCTYPE') || rawHtml.includes('<html'))) {
-               // ★ 修正: Import MapをHeadに注入
-               if (rawHtml.includes('<head>')) {
-                   rawHtml = rawHtml.replace('<head>', `<head>${importMapScript}`);
-               } else {
-                   rawHtml = importMapScript + rawHtml;
-               }
+                // エントリーポイントがない場合、最初のtsx/jsxを探して自動ラップする (これが野菜ソムリエを動かす鍵)
+                if (!entryFile) {
+                    const candidate = files.find(f => /\.(tsx|jsx|js)$/.test(f.name) && !f.name.includes('vite.config'));
+                    if (candidate) {
+                        // 仮想的なエントリーポイントを作成
+                        entryFile = { name: 'virtual-main.tsx' };
+                        const isDefaultExport = candidate.content.includes('export default');
+                        
+                        if (isDefaultExport) {
+                            // App.tsxのようなコンポーネントの場合 -> ラップしてレンダリング
+                            wrapperScript = `
+                                import React from 'react';
+                                import ReactDOM from 'react-dom/client';
+                                import App from './${candidate.name}';
+                                const root = ReactDOM.createRoot(document.getElementById('root'));
+                                root.render(<App />);
+                            `;
+                        } else {
+                            // すでにReactDOM.createRootなどが書かれている場合 -> そのままインポート
+                            wrapperScript = `import './${candidate.name}';`;
+                        }
+                    }
+                }
 
-               const regex = /<script\s+([^>]*?)type=["']text\/babel["']([^>]*?)>([\s\S]*?)<\/script>/gi;
-               
-               finalContent = rawHtml.replace(regex, (match, preAttrs, postAttrs, code) => {
-                   try {
-                       // Babel変換
-                       const res = Babel.transform(code, { 
-                           presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'],
-                           filename: 'script.tsx' 
-                       });
-                       
-                       const hasImport = code.includes('import ') || match.includes('data-type="module"');
-                       const typeAttr = hasImport ? 'type="module"' : ''; // moduleならimportが使える
-                       
-                       return `<script ${preAttrs} ${typeAttr} ${postAttrs}>${res.code}<\/script>`;
-                   } catch(e) {
-                       console.error(e);
-                       return `<script>document.body.innerHTML += '<div style="color:red">Compile Error: ${e.message}</div>'<\/script>`;
-                   }
-               });
+                // 基本HTML
+                let rawHtml = fileMap['index.html'] || `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div></body></html>`;
 
-               // 不要なBabel CDN読み込みを削除
-               finalContent = finalContent.replace(/<script\s+src=["'].*babel.*["']><\/script>/gi, '');
-               
-               // エラー表示用スクリプト注入
-               const errorScript = `<script>window.onerror=function(m,u,l){document.body.innerHTML+='<div style="position:fixed;top:0;left:0;width:100%;background:#500;color:#fff;padding:10px;z-index:9999;">Runtime Error: '+m+' (Line '+l+')</div>';return false;}<\/script>`;
-               if(finalContent.includes('<head>')) finalContent = finalContent.replace('<head>', `<head>${errorScript}`); else finalContent = errorScript + finalContent;
-
-            }
-            // --- モード2: Viteプロジェクト ---
-            else {
+                // CSS処理
                 const css = files.filter(f => f.name.endsWith('.css')).map(f => f.content).join('\n');
-                const styleTag = `<style>${css} body { background-color: white; }</style>`;
+                const styleTag = `<style>${css} body { background-color: white; margin: 0; }</style>`;
                 if (rawHtml.includes('</head>')) rawHtml = rawHtml.replace('</head>', `${styleTag}</head>`); else rawHtml += styleTag;
 
+                // ライブラリ
                 const libs = `
                   <script src="https://cdn.tailwindcss.com"><\/script>
                   <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
@@ -169,45 +179,93 @@
                 `;
                 if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${libs}`); else rawHtml = libs + rawHtml;
 
-                if (entryFile) {
-                    const blobUrls = {};
-                    
-                    files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name) && !f.name.includes('vite.config')).forEach(file => {
-                        let code = file.content;
-                        if (file.name.endsWith('.css')) {
-                            code = `const s = new CSSStyleSheet(); s.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default s;`;
-                        } else {
-                            try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } catch(e) { console.error(e); }
-                        }
-                        const blob = new Blob([code], { type: 'application/javascript' });
-                        const url = URL.createObjectURL(blob);
-                        blobUrls[`./${file.name}`] = url;
-                        blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url;
-                    });
+                // Blob URL生成
+                const blobUrls = {};
+                files.filter(f => /\.(ts|tsx|js|jsx|css)$/.test(f.name)).forEach(file => {
+                    let code = file.content;
+                    if (file.name.endsWith('.css')) {
+                        code = `const s = new CSSStyleSheet(); s.replaceSync(\`${file.content.replace(/`/g, '\\`')}\`); export default s;`;
+                    } else {
+                        try { code = Babel.transform(file.content, { presets: [['env', { modules: false }], 'react', 'typescript'], filename: file.name }).code; } catch(e) { console.error(e); }
+                    }
+                    const blob = new Blob([code], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    blobUrls[`./${file.name}`] = url;
+                    blobUrls[`./${file.name.replace(/\.[^/.]+$/, "")}`] = url; // 拡張子なし対応
+                });
 
-                    // ★ 修正: 共通importsとblobUrlsを結合
-                    const viteImportMapScript = `<script type="importmap">{ "imports": ${JSON.stringify({...imports, ...blobUrls})} }<\/script>`;
-                    rawHtml = rawHtml.replace('</head>', `${viteImportMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
-                    
-                    const entryScript = `<script type="module">
-                        document.adoptedStyleSheets = [];
-                        ${files.filter(f => f.name.endsWith('.css')).map((f,i) => `import s${i} from './${f.name}'; document.adoptedStyleSheets.push(s${i});`).join('\n')}
-                        import './${entryFile.name}';
-                    <\/script>`;
-                    if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${entryScript}</body>`); else rawHtml += entryScript;
+                // Import Map + Entry Script
+                const combinedImports = { ...imports, ...blobUrls };
+                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify(combinedImports)} }<\/script>`;
+                rawHtml = rawHtml.replace('</head>', `${importMapScript}</head>`).replace(/<script\s+type=["']module["']\s+src=["']([^"']+)["']\s*><\/script>/gi, '');
+
+                // Virtual Wrapper or Real Entry
+                let entryCode = "";
+                if (wrapperScript) {
+                     // Babel transform wrapper
+                     try { entryCode = Babel.transform(wrapperScript, { presets: ['env', 'react', 'typescript'], filename: 'virtual.tsx' }).code; } catch(e){}
+                } else if (entryFile && blobUrls[`./${entryFile.name}`]) {
+                     entryCode = `import './${entryFile.name}';`;
                 }
+
+                const executionScript = `<script type="module">
+                    document.adoptedStyleSheets = [];
+                    ${files.filter(f => f.name.endsWith('.css')).map((f,i) => `import s${i} from './${f.name}'; document.adoptedStyleSheets.push(s${i});`).join('\n')}
+                    ${entryCode}
+                <\/script>`;
+
+                if(rawHtml.includes('</body>')) rawHtml = rawHtml.replace('</body>', `${executionScript}</body>`); else rawHtml += executionScript;
                 finalContent = rawHtml;
+
+            } else {
+                // ★ HTML (Classic) モード (筆算電卓など)
+                let rawHtml = fileMap['index.html'] || files.find(f => f.name.endsWith('.html'))?.content || "";
+                
+                // Import Map注入 (HTMLモードでもimportを使う場合に対応)
+                const importMapScript = `<script type="importmap">{ "imports": ${JSON.stringify(imports)} }<\/script>`;
+                if (rawHtml.includes('<head>')) rawHtml = rawHtml.replace('<head>', `<head>${importMapScript}`); else rawHtml = importMapScript + rawHtml;
+
+                // Babel Script変換
+                const regex = /<script\s+([^>]*?)type=["']text\/babel["']([^>]*?)>([\s\S]*?)<\/script>/gi;
+                finalContent = rawHtml.replace(regex, (match, preAttrs, postAttrs, code) => {
+                   try {
+                       const res = Babel.transform(code, { 
+                           presets: [['env', { modules: false, targets: { esmodules: true } }], 'react', 'typescript'],
+                           filename: 'script.tsx' 
+                       });
+                       const hasImport = code.includes('import ') || match.includes('data-type="module"');
+                       return `<script ${preAttrs} ${hasImport ? 'type="module"' : ''} ${postAttrs}>${res.code}<\/script>`;
+                   } catch(e) { return `<script>document.body.innerHTML += '<div style="color:red">Error: ${e.message}</div>'<\/script>`; }
+                });
+                
+                // Remove CDN babel to avoid double load
+                finalContent = finalContent.replace(/<script\s+src=["'].*babel.*["']><\/script>/gi, '');
             }
 
-            // ★ Blob URLを使ってiframeに表示
+            // iframe表示
             const blob = new Blob([finalContent], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             setPreviewUrl(url);
 
           } catch(e) { console.error(e); }
-        }, [files]);
+        }, [files, refreshKey, mode]);
 
-        return e("iframe", { src: previewUrl, className: "flex-1 w-full h-full bg-white border-none", sandbox: "allow-scripts allow-modals allow-same-origin allow-forms allow-downloads" });
+        return (
+          <div className="flex flex-col h-full bg-white">
+            <div className="flex items-center justify-between px-2 py-1 bg-gray-100 border-b border-gray-300 shrink-0 h-8">
+              <div className="flex items-center gap-2">
+                 <span className="text-xs text-gray-500 font-bold flex gap-1 items-center"><Icons.Settings size={12}/> Mode:</span>
+                 <select value={mode} onChange={(e)=>setMode(e.target.value)} className="text-xs bg-white border border-gray-300 rounded px-1 py-0.5 outline-none text-gray-700">
+                    <option value="auto">Auto Detect</option>
+                    <option value="react">React (Module)</option>
+                    <option value="html">HTML (Classic)</option>
+                 </select>
+              </div>
+              <button onClick={()=>setRefreshKey(k=>k+1)} className="text-gray-500 hover:text-blue-600" title="Reload"><Icons.Refresh size={14}/></button>
+            </div>
+            <iframe src={previewUrl} className="flex-1 w-full h-full border-none" sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-downloads" />
+          </div>
+        );
       };
 
       // --- サイドバー ---
