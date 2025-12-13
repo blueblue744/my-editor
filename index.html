@@ -4,9 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>CodePlay Editor (Final)</title>
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#111827" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>" />
     <style>
       body{margin:0;overflow:hidden;background-color:#111827;touch-action:manipulation}#root,body,html{height:100%}input,textarea,button,select{font-size:14px}textarea::placeholder{color:#555;opacity:.5}.modal-overlay{background-color:rgba(0,0,0,.7);backdrop-filter:blur(2px)}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#1e1e1e}::-webkit-scrollbar-thumb{background:#444;border-radius:3px}
@@ -16,46 +13,84 @@
   <body>
     <div id="loading-screen">
       <svg class="animate-spin h-8 w-8 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-      <p>Loading Libraries...</p>
+      <p id="loading-message">Loading Libraries...</p>
     </div>
     <div id="root" class="w-screen flex flex-col" style="display: none;"></div>
 
-    <!-- ライブラリをCDNから読み込む -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://unpkg.com/@webcontainer/api/dist/index.global.js"></script>
+    <!-- ライブラリの動的ローダー -->
+    <script id="loader">
+      (async function() {
+        const libs = [
+          "https://cdn.tailwindcss.com",
+          "https://unpkg.com/react@18/umd/react.production.min.js",
+          "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
+          "https://unpkg.com/@babel/standalone/babel.min.js",
+          "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
+          "https://unpkg.com/@webcontainer/api/dist/index.global.js"
+        ];
+        const loadingMessage = document.getElementById('loading-message');
+
+        try {
+          for (const src of libs) {
+            loadingMessage.textContent = `Loading ${src.split('/').pop()}...`;
+            await new Promise((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = src;
+              script.onload = resolve;
+              script.onerror = () => reject(new Error(`Failed to load ${src}`));
+              document.head.appendChild(script);
+            });
+          }
+
+          loadingMessage.textContent = 'Initializing Application...';
+          const appSource = document.getElementById('app-source').textContent;
+          const babelScript = document.createElement('script');
+          babelScript.setAttribute('type', 'text/babel');
+          babelScript.setAttribute('data-presets', 'react,typescript');
+          babelScript.textContent = appSource;
+          document.body.appendChild(babelScript);
+
+          document.getElementById('loading-screen').style.display = 'none';
+          document.getElementById('root').style.display = 'flex';
+        } catch (error) {
+          loadingMessage.style.color = 'red';
+          loadingMessage.textContent = `Error: ${error.message}`;
+          console.error(error);
+        }
+      })();
+    </script>
     
-    <!-- アプリケーション本体 -->
-    <script type="text/babel" data-presets="react,typescript">
+    <!-- アプリケーション本体のコード (type="text/plain"でBabelの自動実行を抑制) -->
+    <script type="text/plain" id="app-source">
       const { useState, useEffect, useRef, useMemo } = React;
       const e = React.createElement;
 
+      // --- アイコン ---
       const Icon = ({ path, size = 18, className = "" }) => ( e("svg", { xmlns: "http://www.w3.org/2000/svg", width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", className: className, dangerouslySetInnerHTML: { __html: path } }) );
-      const Icons = { Menu: (p) => e(Icon, { ...p, path: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>' }), /* ... and so on for all icons ... */ };
+      const Icons = { Menu: (p) => e(Icon, { ...p, path: '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>' }), /* ... 他のアイコン ... */ };
 
-      const WebContainerPreview = ({ files }) => {
-        // ... (The full WebContainerPreview component code from our previous attempts)
-        const [wcInstance, setWcInstance] = useState(null);
-        // ... rest of the component
-        return e("div", {className: "flex flex-col h-full bg-gray-800 text-white"}, "Loading WebContainer...");
-      };
-
-      const App = () => {
-        // ... (The full App component code from your original file)
-        const [files, setFiles] = useState(() => { try { return JSON.parse(localStorage.getItem("cp_files_wc") || "[]"); } catch { return []; } });
-        // ... rest of the component
-        return e("div", {className: "flex flex-col h-full text-white font-sans bg-gray-900"}, /* ... all child components ... */);
-      };
+      // ... ここにWebContainers版のすべてのコンポーネント（Editor, WebContainerPreview, Sidebar, FileExplorer, App）の完全なコードを貼り付けてください ...
       
-      ReactDOM.createRoot(document.getElementById('root')).render(e(App));
+      const App = () => {
+        const [files, setFiles] = useState(() => { try { return JSON.parse(localStorage.getItem("cp_files_wc") || "[]"); } catch { return []; } });
+        const [activeId, setActiveId] = useState(null);
+        // ... Appコンポーネントの残りのロジック ...
 
-      window.addEventListener('load', () => {
-        document.getElementById('loading-screen').style.display = 'none';
-        document.getElementById('root').style.display = 'flex';
-      });
+        const activeFile = files.find(f => f.id === activeId);
+
+        return e("div", {className:"flex flex-col h-full text-white font-sans bg-gray-900"},
+            e("header", { /* ... */ }),
+            e("main", {className:"flex-1 flex overflow-hidden relative"},
+                e("div", {className: "w-full md:w-56 ..."}, e(FileExplorer, { /* ... */ })),
+                e("div", {className: "flex-1 ..."}, e(Editor, { file: activeFile, /* ... */ })),
+                e("div", {className: "flex-1 ..."}, e(WebContainerPreview, { files: files }))
+            ),
+            e("div", {className: "md:hidden ..."}) // mobile footer
+            // ... Modals and Sidebars
+        );
+      };
+
+      ReactDOM.createRoot(document.getElementById('root')).render(e(App));
     </script>
   </body>
 </html>
